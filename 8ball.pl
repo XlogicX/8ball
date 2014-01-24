@@ -17,7 +17,7 @@ my @payload_peices;		#This array has all modifiers to said peices
 my @payload_metadata;	#This array has all socket metadata for each rule
 my $payloads;			#This variable has the number of rules read in	
 
-
+######################################---Parse Rules---####################################################
 open IN, 'rules.download' or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
 while (<IN>) {				#Whilst we still have lines in our file
 	$lines[$.-1] = $_;		#Get the current line and store it in that corresponding cell in our @lines array
@@ -103,15 +103,55 @@ while ($i < $payloads) {						#while we still have payloads
 	}
 	$i++;
 }
+###########################################################################################################
 
-print "payload 12[1]: $payload_data[12][1]\n";
-print "payload 12[1]'s http_uri: $payload_peices[12][1][5]\n";
-print "payload metadata\n";
-print "\tprotocol: $payload_metadata[12][0]\n";
-print "\tsource net: $payload_metadata[12][1]\n";
-print "\tsource port: $payload_metadata[12][2]\n";
-print "\tdest net: $payload_metadata[12][3]\n";
-print "\tdest port: $payload_metadata[12][4]\n";
+my $sub_packet;												#declare peice of packet
+$count = 0;													#init counter
+while ($count < $payloads) {								#while we still have rules
+	my $j = 0;												#init content/pcre/uricontent counter
+	while ($payload_data[$count][$j]) {						#while we still have content/pcre/uricontent elements
+		$sub_packet = "$payload_data[$count][$j]\n";		#grab the element
+ 		#is the element "content"? if so, handle with content() sub
+    	if ($sub_packet =~ /^!?content:"(.+?)";.+$/) { 		#parse the peice between ""'s in content
+    		$sub_packet = $1;								#put it in global variable for sub
+    		content();										#run sub
+    	}	
+    	print "$sub_packet\n";								#print interpreted peice (will do something else with this later)
+		$j++												#inc
+	}
+	print "\n";
+	$count++;												#inc
+}
+
+
+sub content {
+	#Content rules are "mostly" plaintext, but there's the tricky |hex| stuff to deal with, this
+	#is mostly why this subroutine exists
+    while ($sub_packet =~ /\|(([0-9a-f]{2}\s*)+?)\|/i){     #while there is content with between |'s
+        my $hex = $1;										#parse it out
+        my $match = $hex;									#keep another copy of the match
+        $ascii = '';										#init the plaintext
+        $hex =~ s/\s//g;        							#remove spaces (it's in |AB CD EF 01| format)
+        while ($hex) {										#So while we have remaining hex data to process
+            if ($hex =~ /(..)/) {							#grab first two nibbles
+            							#And format it into ASCII/Binary data
+                $ascii .= pack("C*", map { $_ ? hex($_) :() } split(/\\x/, $1));
+            }
+            $hex =~ s/..//;									#Then remove the part we just processed so we can do another round
+        }
+        $sub_packet =~ s/\|$match\|/$ascii/;                #now replace the |41 42 43| stuff with ABC
+    }
+}
+
+#Testing:
+#print "payload 12[1]: $payload_data[12][1]\n";
+#print "payload 12[1]'s http_uri: $payload_peices[12][1][5]\n";
+#print "payload metadata\n";
+#print "\tprotocol: $payload_metadata[12][0]\n";
+#print "\tsource net: $payload_metadata[12][1]\n";
+#print "\tsource port: $payload_metadata[12][2]\n";
+#print "\tdest net: $payload_metadata[12][3]\n";
+#print "\tdest port: $payload_metadata[12][4]\n";
 
 =put
 
