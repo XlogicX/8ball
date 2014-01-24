@@ -7,46 +7,44 @@ use Time::HiRes qw(usleep nanosleep);
 my $payload;
 my $content;
 my $ascii;
-my @lines;			#each and every rule raw
-my $count;			#general iterator
+my @lines;				#each and every rule raw
+my $count;				#general iterator
+my $peice;				#another indexer
 
-my $subexp;
-my @payload_data;
-my @payload_peices;
-my @payload_metadata;
-my $peice;
-my $payloads;
-my $peices;
+my $subexp;				#for parsing contet/pcre/uricontent sub expressions
+my @payload_data;		#This 2D array has all content/pcre/uricontent peices
+my @payload_peices;		#This array has all modifiers to said peices
+my @payload_metadata;	#This array has all socket metadata for each rule
+my $payloads;			#This variable has the number of rules read in	
 
 
 open IN, 'rules.download' or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
-while (<IN>) {
-	$lines[$.-1] = $_;
+while (<IN>) {				#Whilst we still have lines in our file
+	$lines[$.-1] = $_;		#Get the current line and store it in that corresponding cell in our @lines array
 }
-close IN;
+close IN;					#Close our rules filehandle
 
-#This loop catalogues all content/pcre pecies for each rule into the @payload 2 diminsional array [rule][content/pcre part]
-$count = 0;
-foreach (@lines) {
-#	print "line $.\n";
-	my $line = $_;
-#	print "$line\n";
-	$peice = 0;	
+#This loop catalogues all content/pcre pecies for each rule into the @payload 2 diminsional array [rule][content/pcre/uricontent part]
+$count = 0;				#init the counter
+foreach (@lines) {		#go through each rule
+	my $line = $_;		#Get a copy of the rule to mangle through
+	$peice = 0;			#Note that we are on our first content/pcre/uricontent peice
 	while (($line =~ /;\s*?((content|pcre|uricontent):!?\s?".+?";.+?)(content|pcre|uricontent).+\)$/) || ($line =~ /;\s*?((content|pcre|uricontent):!?\s?".+?".+)\)$/) ) {
-		#$1 will capture first content:""; and all options after it (up to the next content or pcre)
-		$subexp = $1;
-		$payload_data[$count][$peice] = $subexp;
-		$line =~ s/\Q$subexp\E//;
-		$peice++;
+		#$1 will capture first content/pcre/uricontent:""; and all options after it (up to the next content or pcre)
+		$subexp = $1;								#grap the peice
+		$payload_data[$count][$peice] = $subexp;	#store it in $payload_data[rule number][peice in rule]
+		$line =~ s/\Q$subexp\E//;					#remove what we found so we can easily iterate to the next peice
+		$peice++;									#(next peice)
 	}
-	$count++;
+	$count++;										#(incremnt index number for next rule)
 }
 
 #Get metadata/socket for each rule (which network/port to network/port), and other tidbits
-$count = 0;
-foreach (@lines) {
-	my $line = $_;
-	if ($line =~ /^#*?alert\s+([^\s]+?)\s+([^\s]+?)\s+([^\s]+?)\s+.+?>\s+([^\s]+?)\s+([^\s]+?)\s+/) {
+$count = 0;				#init the counter
+foreach (@lines) {		#go through each rule
+	#This regex looks gnarly, but it's just getting first part of rule:
+		#protocol, source_net, source_port, dest_net, dest_port
+	if ($_ =~ /^#*?alert\s+([^\s]+?)\s+([^\s]+?)\s+([^\s]+?)\s+.+?>\s+([^\s]+?)\s+([^\s]+?)\s+/) {
 		$payload_metadata[$count][0] = $1;
 		$payload_metadata[$count][1] = $2;
 		$payload_metadata[$count][2] = $3;
@@ -58,7 +56,7 @@ foreach (@lines) {
 
 $payloads = @payload_data;	#get number of rules
 
-#iterate through all pcre/content peices
+#iterate through all pcre/content peices and note modifiers
 my $i = 0;											#init the iterators
 my $j = 0;											#init the iterators
 while ($i < $payloads) {						#while we still have payloads
@@ -106,14 +104,14 @@ while ($i < $payloads) {						#while we still have payloads
 	$i++;
 }
 
-print "payload 153[0]: $payload_data[153][0]\n";
-print "payload 153[0]'s http_uri: $payload_peices[153][0][9]\n";
+print "payload 12[1]: $payload_data[12][1]\n";
+print "payload 12[1]'s http_uri: $payload_peices[12][1][5]\n";
 print "payload metadata\n";
-print "\tprotocol: $payload_metadata[153][0]\n";
-print "\tsource net: $payload_metadata[153][1]\n";
-print "\tsource port: $payload_metadata[153][2]\n";
-print "\tdest net: $payload_metadata[153][3]\n";
-print "\tdest port: $payload_metadata[153][4]\n";
+print "\tprotocol: $payload_metadata[12][0]\n";
+print "\tsource net: $payload_metadata[12][1]\n";
+print "\tsource port: $payload_metadata[12][2]\n";
+print "\tdest net: $payload_metadata[12][3]\n";
+print "\tdest port: $payload_metadata[12][4]\n";
 
 =put
 
@@ -121,7 +119,7 @@ print "\tdest port: $payload_metadata[153][4]\n";
 $payload_data[rule][content or pcre part]
 
 @payload_peices datastructure:
-$peices[rule][content or pcre part][modifier]
+$payload_peices[rule][content or pcre part][modifier]
 	[0] = offset (value)
 	[1] = distance (value)
 	[2] = http_client_body (yes/no)
@@ -132,6 +130,13 @@ $peices[rule][content or pcre part][modifier]
 	[7] = http_stat_code (yes/no)
 	[8] = http_stat_msg (yes/no)
 	[9] = isdataat (value)
+
+$payload_metadata[rule][item]
+	[0] = protocol (tcp/udp)
+	[1] = source network
+	[2] = source port
+	[3] = dest network
+	[4] = dest port
 
 modifiers to use / not use:
 	Not Use:
@@ -166,6 +171,6 @@ modifiers to use / not use:
 		isdataat: another area that may need padding
 
 	Non-Content modifiers to use:
-		http_encode
+		http_encode: Probably wont use anyway, didn't find much ET rules using this
 
 =cut
