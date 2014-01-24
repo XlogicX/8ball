@@ -7,6 +7,8 @@ use Time::HiRes qw(usleep nanosleep);
 my $payload;
 my $content;
 my $ascii;
+my @lines;			#each and every rule raw
+my $count;			#general iterator
 
 my $subexp;
 my @payload_data;
@@ -18,10 +20,14 @@ my $peices;
 
 
 open IN, 'rules.download' or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
-
+while (<IN>) {
+	$lines[$.-1] = $_;
+}
+close IN;
 
 #This loop catalogues all content/pcre pecies for each rule into the @payload 2 diminsional array [rule][content/pcre part]
-while (<IN>) {
+$count = 0;
+foreach (@lines) {
 #	print "line $.\n";
 	my $line = $_;
 #	print "$line\n";
@@ -29,26 +35,26 @@ while (<IN>) {
 	while (($line =~ /;\s*?((content|pcre|uricontent):!?\s?".+?";.+?)(content|pcre|uricontent).+\)$/) || ($line =~ /;\s*?((content|pcre|uricontent):!?\s?".+?".+)\)$/) ) {
 		#$1 will capture first content:""; and all options after it (up to the next content or pcre)
 		$subexp = $1;
-		$payload_data[$.][$peice] = $subexp;
+		$payload_data[$count][$peice] = $subexp;
 		$line =~ s/\Q$subexp\E//;
 		$peice++;
 	}
+	$count++;
 }
-close IN;
 
 #Get metadata/socket for each rule (which network/port to network/port), and other tidbits
-open IN, 'rules.download' or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
-while (<IN>) {
+$count = 0;
+foreach (@lines) {
 	my $line = $_;
 	if ($line =~ /^#*?alert\s+([^\s]+?)\s+([^\s]+?)\s+([^\s]+?)\s+.+?>\s+([^\s]+?)\s+([^\s]+?)\s+/) {
-		$payload_metadata[$.][0] = $1;
-		$payload_metadata[$.][1] = $2;
-		$payload_metadata[$.][2] = $3;
-		$payload_metadata[$.][3] = $4;
-		$payload_metadata[$.][4] = $5;		
+		$payload_metadata[$count][0] = $1;
+		$payload_metadata[$count][1] = $2;
+		$payload_metadata[$count][2] = $3;
+		$payload_metadata[$count][3] = $4;
+		$payload_metadata[$count][4] = $5;		
 	}
+	$count++
 }
-close IN;
 
 $payloads = @payload_data;	#get number of rules
 
