@@ -11,6 +11,7 @@ my $ascii;
 my $subexp;
 my @payload_data;
 my @payload_peices;
+my @payload_metadata;
 my $peice;
 my $payloads;
 my $peices;
@@ -21,9 +22,9 @@ open IN, 'rules.download' or die "The file has to actually exist, try again $!\n
 
 #This loop catalogues all content/pcre pecies for each rule into the @payload 2 diminsional array [rule][content/pcre part]
 while (<IN>) {
-	print "line $.\n";
+#	print "line $.\n";
 	my $line = $_;
-	print "$line\n";
+#	print "$line\n";
 	$peice = 0;	
 	while (($line =~ /;\s*?((content|pcre|uricontent):!?\s?".+?";.+?)(content|pcre|uricontent).+\)$/) || ($line =~ /;\s*?((content|pcre|uricontent):!?\s?".+?".+)\)$/) ) {
 		#$1 will capture first content:""; and all options after it (up to the next content or pcre)
@@ -33,6 +34,21 @@ while (<IN>) {
 		$peice++;
 	}
 }
+close IN;
+
+#Get metadata/socket for each rule (which network/port to network/port), and other tidbits
+open IN, 'rules.download' or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
+while (<IN>) {
+	my $line = $_;
+	if ($line =~ /^#*?alert\s+([^\s]+?)\s+([^\s]+?)\s+([^\s]+?)\s+.+?>\s+([^\s]+?)\s+([^\s]+?)\s+/) {
+		$payload_metadata[$.][0] = $1;
+		$payload_metadata[$.][1] = $2;
+		$payload_metadata[$.][2] = $3;
+		$payload_metadata[$.][3] = $4;
+		$payload_metadata[$.][4] = $5;		
+	}
+}
+close IN;
 
 $payloads = @payload_data;	#get number of rules
 
@@ -86,6 +102,12 @@ while ($i < $payloads) {						#while we still have payloads
 
 print "payload 153[0]: $payload_data[153][0]\n";
 print "payload 153[0]'s http_uri: $payload_peices[153][0][9]\n";
+print "payload metadata\n";
+print "\tprotocol: $payload_metadata[153][0]\n";
+print "\tsource net: $payload_metadata[153][1]\n";
+print "\tsource port: $payload_metadata[153][2]\n";
+print "\tdest net: $payload_metadata[153][3]\n";
+print "\tdest port: $payload_metadata[153][4]\n";
 
 =put
 
