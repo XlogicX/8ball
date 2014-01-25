@@ -108,14 +108,24 @@ while ($i < $payloads) {						#while we still have payloads
 my $sub_packet;												#declare peice of packet
 $count = 0;													#init counter
 while ($count < $payloads) {								#while we still have rules
+	print "Rule $count -------------------\n";
 	my $j = 0;												#init content/pcre/uricontent counter
 	while ($payload_data[$count][$j]) {						#while we still have content/pcre/uricontent elements
 		$sub_packet = "$payload_data[$count][$j]\n";		#grab the element
  		#is the element "content"? if so, handle with content() sub
-    	if ($sub_packet =~ /^!?content:"(.+?)";.+$/) { 		#parse the peice between ""'s in content
+    	if ($sub_packet =~ /^content:"(.+?)";.+$/) { 		#parse the peice between ""'s in content
     		$sub_packet = $1;								#put it in global variable for sub
     		content();										#run sub
     	}	
+    	#do we have a negeated content element
+    	if ($sub_packet =~ /^content:!"(.+?)";.+$/) { 		#parse the peice between ""'s in content
+    		$sub_packet = 'lol';							#if so, doesn't really matter what we inject
+    	}	    	
+ 		#is the element "pcre"? if so, handle with pcre() sub
+    	if ($sub_packet =~ /^pcre:"\/(.+)\/.*";.+$/) { 		#parse the peice between ""'s in content
+    		$sub_packet = $1;								#put it in global variable for sub
+    		pcre();										#run sub
+    	}	    	
     	print "$sub_packet\n";								#print interpreted peice (will do something else with this later)
 		$j++												#inc
 	}
@@ -141,6 +151,122 @@ sub content {
         }
         $sub_packet =~ s/\|$match\|/$ascii/;                #now replace the |41 42 43| stuff with ABC
     }
+}
+
+sub pcre {
+	my $regex = $sub_packet;
+	#Handle Anchors (drop them, as they match anyway as a side effect)
+	$regex =~ s/^\^//;
+	$regex =~ s/\$$//;
+
+	#Character Classes (Needs some Expansion)
+	$regex =~ s/\\s/ /g;		#Handle regex whitespace (replace with 1 space
+	$regex =~ s/\\w/a/g;		#handle regex alphanumeric (replace with an "a")
+	$regex =~ s/\\d/1/g;		#handle regex digits (replace with a 1)
+
+	$regex =~ s/([^\}\\])\./$1a/g;	#replace "." with "a" if not preceded by \ or }
+
+	#Kill lazyness
+	#If we get *? or +?, drop the ?
+	$regex =~ s/\*\?/*/g;
+	$regex =~ s/\+\?/+/g;
+
+	#Quantifiers (Done)
+	$regex =~ s/([^\\])\+/$1/g;		#handle 1 or more (remove the +, thing preceding it stays, wich is equivilant to 1)
+	$regex =~ s/([^\\])\*/$1/g;		#handle 0, 1, or more (remove the *, thing preceding it stays, wich is equivilant to 1)
+	$regex =~ s/([^\\])\?/$1/g;		#handle 0 or 1 (remove the ?, thing preceding it stays, wich is equivilant to 1)
+
+	#Literals (Needs some Expansion
+	$regex =~ s/\\\././g;		#handle literal periods (replace with \. with .)
+	$regex =~ s/\\\//\//g;		#handle literal forward slashes (replace with \/ with /)
+	$regex =~ s/\\\?/\?/g;		#handle literal ?'s (replace with \? with ?)
+	$regex =~ s/\\\-/\-/g;		#handle literal -'s
+	$regex =~ s/\\\\/\\/g;		#handle literal \'s		
+	$regex =~ s/\\\]/\]/g;		#handle literal ]'s	
+	$regex =~ s/\\\(/\(/g;		#handle literal ('s
+	$regex =~ s/\\\)/\)/g;		#handle literal )'s
+	$regex =~ s/\\\*/\*/g;		#handle literal *'s
+	$regex =~ s/\\\|/\|/g;		#handle literal |'s
+	$regex =~ s/\\\{/\{/g;		#handle literal {'s
+	$regex =~ s/\\\}/\}/g;		#handle literal }'s
+	$regex =~ s/\\\;/\;/g;		#handle literal ;'s
+	$regex =~ s/\\\%/\%/g;		#handle literal %'s
+	$regex =~ s/\\\:/\:/g;		#handle literal :'s
+	$regex =~ s/\\\r/\r/g;		#handle literal \r's
+	$regex =~ s/\\\n/\n/g;		#handle literal \n's
+	$regex =~ s/\\\$/\$/g;		#handle literal \$'s
+
+	#handle hex encoding
+	while ($regex =~ /\\x([0-9a-f]{2})/i) {
+	my $hex = pack("C*", map { $_ ? hex($_) :() } split(/\\x/, $1));
+	$regex =~ s/\\x([0-9a-f]{2})/$hex/i
+	}
+
+	#handle character classes []'s, just take the first character for each []
+	#In the case of a negated class [^abc], the "^" character gets picked as a 
+	#side effect, which is still fine. [^^] is accounted for as well.
+	while ($regex =~ /\[(.)(.*?)\]/) {
+		my $class = $1;
+		my $extra = $2;
+		if (($class eq '^') && ($extra) && (($extra =~ /\^/) || ($extra =~ /^\\/))) {
+			$regex =~ s/\[(.).*?\]/a/;	#handles a special negated class of [^^]
+		} else {
+			if ($class eq '\\') {									#if it starts with a \
+				$regex =~ s/\[(.).*?\[/\[/ if ($extra =~ /^\[/);		#if next char is \, then replace with c
+				$regex =~ s/\[(.).*?\]/\]/ if ($extra =~ /^\]/);
+				$regex =~ s/\[(.).*?\]/\r/ if ($extra =~ /^r/i);		
+				$regex =~ s/\[(.).*?\]/\n/ if ($extra =~ /^n/i);
+				$regex =~ s/\[(.).*?\]/x/ if ($extra =~ /^s/i);	
+				$regex =~ s/\[(.).*?\]/\:/ if ($extra =~ /^:/);
+				$regex =~ s/\[(.).*?\]/\(/ if ($extra =~ /^\(/);
+				$regex =~ s/\[(.).*?\]/\)/ if ($extra =~ /^\)/);
+				$regex =~ s/\[(.).*?\]/\;/ if ($extra =~ /^\;/);
+				$regex =~ s/\[(.).*?\]/\*/ if ($extra =~ /^\*/);
+				$regex =~ s/\[(.).*?\]/\\/ if ($extra =~ /^\\/);
+				$regex =~ s/\[(.).*?\]/\|/ if ($extra =~ /^\|/);
+				$regex =~ s/\[(.).*?\]/\{/ if ($extra =~ /^\{/);
+				$regex =~ s/\[(.).*?\]/\}/ if ($extra =~ /^\}/);
+				$regex =~ s/\[(.).*?\]/\%/ if ($extra =~ /^\%/);
+				$regex =~ s/\[(.).*?\]/\$/ if ($extra =~ /^\$/);
+				$regex =~ s/\[(.).*?\]/\\/ if ($extra eq '');		
+			} else {
+				$regex =~ s/\[(.).*?\]/$class/;
+			}
+		}
+	}
+
+	#{30,613} {34}
+	#handle {}'s, take the only or first number and repeat that many times
+	#This one is probably the most complicated, must be done before ()'s
+	while ($regex =~ /(\))?\{(\d).*?\}/s){
+		my $grouper = $1;
+		my $digit = $+;
+		my $char;
+		if (!$grouper) {
+			if ($regex =~ /(.)\{(\d+).*?\}/s) {
+				$char = $1;
+				$digit = $2;
+				$char = $char x $digit;	
+			}
+			$regex =~ s/.\{(\d).*?\}/$char/s;
+		} else {
+			if ($regex =~ /(\(.+?\))\{(\d+).*?\}/s) {
+				$char = $1;
+				$digit = $2;
+				$char = $char x $digit;
+			}
+			$regex =~ s/(\(.+?\))\{(\d).*?\}/$char/s;
+		}
+	}
+
+	#handle grouping ()'s, take the first alternation in ()'s
+	while ($regex =~ /\((.+?)\|.+?\)/){
+		$regex =~ s/\((.+?)\|.+?\)/$1/;
+	}
+
+	#remove gratuitus parenthesis
+	$regex =~ s/\(|\)//g;
+	$sub_packet = $regex;
 }
 
 #Testing:
