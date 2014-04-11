@@ -2,6 +2,8 @@
 use warnings;
 use strict;
 use IO::Socket;
+use Getopt::Std;
+use Term::ANSIColor;
 use Time::HiRes qw(usleep nanosleep);
 
 my $payload;
@@ -10,12 +12,23 @@ my $ascii;
 my @lines;				#each and every rule raw
 my $count;				#general iterator
 my $peice;				#another indexer
+my @packets;			#packet data for each rule
+my $base_packet;		#A skeleton of what each packet will look like
 
 my $subexp;				#for parsing contet/pcre/uricontent sub expressions
 my @payload_data;		#This 2D array has all content/pcre/uricontent peices
 my @payload_peices;		#This array has all modifiers to said peices
 my @payload_metadata;	#This array has all socket metadata for each rule
 my $payloads;			#This variable has the number of rules read in	
+
+my %options=();						#For cli options
+getopts("t:", \%options);			#Get the options passed
+
+if ($options{t}) {
+	$base_packet = "GET /? HTTP/1.1\nHost: $options{t}\n\n";
+} else {
+	help();
+}
 
 ######################################---Parse Rules---####################################################
 open IN, 'rules.download' or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
@@ -31,7 +44,7 @@ foreach (@lines) {		#go through each rule
 	$peice = 0;			#Note that we are on our first content/pcre/uricontent peice
 	while (($line =~ /;\s*?((content|pcre|uricontent):!?\s?".+?";.+?)(content|pcre|uricontent).+\)$/) || ($line =~ /;\s*?((content|pcre|uricontent):!?\s?".+?".+)\)$/) ) {
 		#$1 will capture first content/pcre/uricontent:""; and all options after it (up to the next content or pcre)
-		$subexp = $1;								#grap the peice
+		$subexp = $1;								#grab the peice
 		$payload_data[$count][$peice] = $subexp;	#store it in $payload_data[rule number][peice in rule]
 		$line =~ s/\Q$subexp\E//;					#remove what we found so we can easily iterate to the next peice
 		$peice++;									#(next peice)
@@ -44,12 +57,13 @@ $count = 0;				#init the counter
 foreach (@lines) {		#go through each rule
 	#This regex looks gnarly, but it's just getting first part of rule:
 		#protocol, source_net, source_port, dest_net, dest_port
-	if ($_ =~ /^#*?alert\s+([^\s]+?)\s+([^\s]+?)\s+([^\s]+?)\s+.+?>\s+([^\s]+?)\s+([^\s]+?)\s+/) {
+	if ($_ =~ /^#*?alert\s+([^\s]+?)\s+([^\s]+?)\s+([^\s]+?)\s+.+?>\s+([^\s]+?)\s+([^\s]+?)\s+.+sid:(\d+)/) {
 		$payload_metadata[$count][0] = $1;
 		$payload_metadata[$count][1] = $2;
 		$payload_metadata[$count][2] = $3;
 		$payload_metadata[$count][3] = $4;
-		$payload_metadata[$count][4] = $5;		
+		$payload_metadata[$count][4] = $5;	
+		$payload_metadata[$count][5] = $6;	
 	}
 	$count++
 }
@@ -105,34 +119,80 @@ while ($i < $payloads) {						#while we still have payloads
 }
 ###########################################################################################################
 
-my $sub_packet;												#declare peice of packet
+###################################---Build Packet Data---#################################################
+my @packet_content;				#a peice of injected content
+my $content_counter;			#which peice of content
+my @packet_pcre;				#a peice of string that will match pcre
+my $pcre_counter;				#which peice of that string
+my $sub_packet;					#declare peice of packet
+
+#Build out injections for content/pcre/uricontnet elements
 $count = 0;													#init counter
 while ($count < $payloads) {								#while we still have rules
-	print "Rule $count -------------------\n";
-	my $j = 0;												#init content/pcre/uricontent counter
+
+	my $socket = IO::Socket::INET->new(
+	PeerAddr => $options{t},
+	PeerPort => '80',
+	Proto        => 'tcp',
+	) or next;
+
+	$packets[$count] = $base_packet;
+	#print "\nRule $count -------------------\n";
+	my $j = 0;	
+	$content_counter = 0;									#init content/pcre/uricontent counter
+	$pcre_counter = 0;
+	print color 'bold blue';
+	print "sid:$payload_metadata[$count][5]\n";	
+	print color 'reset';
+	print "GET /?";
 	while ($payload_data[$count][$j]) {						#while we still have content/pcre/uricontent elements
 		$sub_packet = "$payload_data[$count][$j]\n";		#grab the element
  		#is the element "content"? if so, handle with content() sub
     	if ($sub_packet =~ /^content:"(.+?)";.+$/) { 		#parse the peice between ""'s in content
     		$sub_packet = $1;								#put it in global variable for sub
     		content();										#run sub
+    		$packet_content[$count][$content_counter] = $sub_packet;
+    		print color 'green';
+    		print $packet_content[$count][$content_counter];
+    		$packets[$count] =~ s/(GET \/\?.*)( HTTP\/1.1.+)/$1$packet_content[$count][$content_counter]$2/s;
+    		$content_counter++;
     	}	
     	#do we have a negeated content element
     	if ($sub_packet =~ /^content:!"(.+?)";.+$/) { 		#parse the peice between ""'s in content
     		$sub_packet = 'lol';							#if so, doesn't really matter what we inject
+    		$packet_content[$count][$content_counter] = $sub_packet; 
+    		print color 'magenta';
+    		print $packet_content[$count][$content_counter];    		
+    		$packets[$count] =~ s/(GET \/\?.*)( HTTP\/1.1.+)/$1$packet_content[$count][$content_counter]$2/s;    		  		
+    		$content_counter++;    		
     	}	    	
  		#is the element "pcre"? if so, handle with pcre() sub
     	if ($sub_packet =~ /^pcre:"\/(.+)\/.*";.+$/) { 		#parse the peice between ""'s in content
     		$sub_packet = $1;								#put it in global variable for sub
-    		pcre();										#run sub
+    		pcre();											#run sub
+    		$packet_content[$count][$pcre_counter] = $sub_packet;  
+    		#$packets[$count] =~ s/(GET \/\?.*)(HTTP\/1.1.+)/$1$2/s;	
+    		print color 'red';
+    		print $packet_content[$count][$pcre_counter];    				
+    		$packets[$count] =~ s/(GET \/\?.*)( HTTP\/1.1.+)/$1$packet_content[$count][$pcre_counter]$2/s;			 		
+    		$pcre_counter++;    		
     	}	    	
-    	print "$sub_packet\n";								#print interpreted peice (will do something else with this later)
+    	#print "$sub_packet\n";								#print interpreted peice (will do something else with this later)
 		$j++												#inc
 	}
-	print "\n";
+
+	print($socket "$packets[$count]") if $packets[$count];
+	close $socket;
+	#usleep(100000);
+	print color 'reset';
+	print " HTTP/1.1\nHost: $options{t}\n\n";
 	$count++;												#inc
 }
 
+#Deduplicate content items that regex generation would make redundant
+#This is not required, but it's nicer to not have uneeded data in packet
+
+###########################################################################################################
 
 sub content {
 	#Content rules are "mostly" plaintext, but there's the tricky |hex| stuff to deal with, this
@@ -269,9 +329,14 @@ sub pcre {
 	$sub_packet = $regex;
 }
 
+sub help {
+	print "Dummy help file\n";
+	exit;
+}
+
 #Testing:
-#print "payload 12[1]: $payload_data[12][1]\n";
-#print "payload 12[1]'s http_uri: $payload_peices[12][1][5]\n";
+#print "payload 1147[0] data: $payload_data[1147][0]\n";
+#print "payload 1147[0] peice: $payload_peices[1147][0][6]\n";
 #print "payload metadata\n";
 #print "\tprotocol: $payload_metadata[12][0]\n";
 #print "\tsource net: $payload_metadata[12][1]\n";
@@ -303,6 +368,7 @@ $payload_metadata[rule][item]
 	[2] = source port
 	[3] = dest network
 	[4] = dest port
+	[5] = sid
 
 modifiers to use / not use:
 	Not Use:
@@ -320,7 +386,6 @@ modifiers to use / not use:
 		byte_test: Just seems like a pain in the ass
 		byte_jump: Also a pain in the ass
 		byte_extract: Also a pain in the ass
-		uri_len: Probably easy, but wont implement for now due to lack of use in ET rules
 		base64_data: only found one rule in ET that uses this, but may still try implementing			
 
 	Use:
@@ -335,6 +400,7 @@ modifiers to use / not use:
 		http_stat_code
 		http_stat_msg
 		isdataat: another area that may need padding
+		urilen:		
 
 	Non-Content modifiers to use:
 		http_encode: Probably wont use anyway, didn't find much ET rules using this
