@@ -22,16 +22,16 @@ my @payload_metadata;	#This array has all socket metadata for each rule
 my $payloads;			#This variable has the number of rules read in	
 
 my %options=();						#For cli options
-getopts("t:", \%options);			#Get the options passed
+getopts("t:r:d:", \%options);		#Get the options passed
 
-if ($options{t}) {
+if (($options{t}) && ($options{r})) {
 	$base_packet = "GET /? HTTP/1.1\nHost: $options{t}\n\n";
 } else {
 	help();
 }
 
 ######################################---Parse Rules---####################################################
-open IN, 'rules.download' or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
+open IN, "$options{r}" or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
 while (<IN>) {				#Whilst we still have lines in our file
 	$lines[$.-1] = $_;		#Get the current line and store it in that corresponding cell in our @lines array
 }
@@ -134,7 +134,8 @@ while ($count < $payloads) {								#while we still have rules
 	PeerAddr => $options{t},
 	PeerPort => '80',
 	Proto        => 'tcp',
-	) or next;
+	);
+	next unless $socket;
 
 	$packets[$count] = $base_packet;
 	#print "\nRule $count -------------------\n";
@@ -183,12 +184,14 @@ while ($count < $payloads) {								#while we still have rules
 
 	print($socket "$packets[$count]") if $packets[$count];
 	close $socket;
-	#usleep(100000);
+	#usleep(100000);	
+	#usleep(10000);
+	usleep($options{d}) if $options{d};
 	print color 'reset';
 	print " HTTP/1.1\nHost: $options{t}\n\n";
 	$count++;												#inc
 }
-
+#96747
 #Deduplicate content items that regex generation would make redundant
 #This is not required, but it's nicer to not have uneeded data in packet
 
@@ -330,7 +333,18 @@ sub pcre {
 }
 
 sub help {
-	print "Dummy help file\n";
+	print "NAME\n";
+	print "\t8ball - An IDS validation tool\n\n";
+	print "SYNOPSIS\n";
+	print "\ttcpdump -t ip -r rules [ -d delay]\n\n";
+	print "DESCRIPTION\n";
+	print "\tThis tool will 'kick the tires' on your Suricata/Snort based IDS by attempting to send a packet for every rule that you supply it from a rules file input\n\n";
+	print "OPTIONS\n";
+	print "\t-t: The target IP address is required to follow this option\n";
+	print "\t-r: The IDS rule file to feed into 8ball engine";
+	print "\t-d: You can set a delay between each packet, depending on the network performance of the target, packets will drop if you run this too quickly. This is measured in microseconds.\n";
+	print "EXAMPLES\n";
+	print "\t8ball.pl -t 192.168.0.42 -r rules.download -d 10000\n";
 	exit;
 }
 
