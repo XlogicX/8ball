@@ -22,7 +22,7 @@ my @payload_metadata;	#This array has all socket metadata for each rule
 my $payloads;			#This variable has the number of rules read in	
 
 my %options=();						#For cli options
-getopts("t:r:d:", \%options);		#Get the options passed
+getopts("t:r:d:he", \%options);		#Get the options passed
 
 if (($options{t}) && ($options{r})) {
 	$base_packet = "GET /? HTTP/1.1\nHost: $options{t}\n\n";
@@ -30,12 +30,33 @@ if (($options{t}) && ($options{r})) {
 	help();
 }
 
+sub filters($) {
+	#-h -e filters, add them
+	my $filter = shift;
+	my $result;
+	#If we have a tcp rule with a specific source port, don't use it. I don't want to attempt to spoof a TCP socket
+	if ($filter !~ /^alert\s+tcp\s+[^\s]+?\s+any/) {return "false";}
+	#If we want to stick exclusive to $HOME_NET, keep $HOME_NET and 'any'
+	if (($options{h}) && ($filter !~ /^alert\s+\w+\s+(\$HOME_NET|any)/)) {return "false";}
+	#If we want to stick exclusive to $EXTERNAL_NET, keep $EXTERNAL_NET and 'any'	
+	if (($options{e}) && ($filter !~ /^alert\s+\w+\s+(\$EXTERNAL_NET|any)/)) {return "false";}	
+	return "true";
+}
+
 ######################################---Parse Rules---####################################################
 open IN, "$options{r}" or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
+my $i = 0;
 while (<IN>) {				#Whilst we still have lines in our file
-	$lines[$.-1] = $_;		#Get the current line and store it in that corresponding cell in our @lines array
+	if ((filters($_) ne "false")) {
+		$lines[$i] = $_;		#Get the current line and store it in that corresponding cell in our @lines array
+		$i++;
+	}
 }
 close IN;					#Close our rules filehandle
+
+#REMOVE WHEN FINISHED, this file is for troubleshooting which rules made it after filtering
+open OUT, ">troubleshooting.txt";
+	print OUT @lines;
 
 #This loop catalogues all content/pcre pecies for each rule into the @payload 2 diminsional array [rule][content/pcre/uricontent part]
 $count = 0;				#init the counter
@@ -71,7 +92,7 @@ foreach (@lines) {		#go through each rule
 $payloads = @payload_data;	#get number of rules
 
 #iterate through all pcre/content peices and note modifiers
-my $i = 0;											#init the iterators
+$i = 0;											#init the iterators
 my $j = 0;											#init the iterators
 while ($i < $payloads) {						#while we still have payloads
 	$j = 0;
@@ -343,6 +364,8 @@ sub help {
 	print "\t-t: The target IP address is required to follow this option\n";
 	print "\t-r: The IDS rule file to feed into 8ball engine";
 	print "\t-d: You can set a delay between each packet, depending on the network performance of the target, packets will drop if you run this too quickly. This is measured in microseconds.\n";
+	print "\t-h: Limiting rules to only coming from \$HOME_NET; when using 8ball to target external source to trigger internal IDS";
+	print "\t-e: Limiting rules to only coming from \$EXTERNAL_NET; when using 8ball to target IDS from the outside";
 	print "EXAMPLES\n";
 	print "\t8ball.pl -t 192.168.0.42 -r rules.download -d 10000\n";
 	exit;
