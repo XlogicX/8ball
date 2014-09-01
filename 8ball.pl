@@ -357,7 +357,7 @@ sub help {
 	print "NAME\n";
 	print "\t8ball - An IDS validation tool\n\n";
 	print "SYNOPSIS\n";
-	print "\ttcpdump -t ip -r rules [ -d delay]\n\n";
+	print "\t8ball.pl -t ip -r rules [ -d delay]\n\n";
 	print "DESCRIPTION\n";
 	print "\tThis tool will 'kick the tires' on your Suricata/Snort based IDS by attempting to send a packet for every rule that you supply it from a rules file input\n\n";
 	print "OPTIONS\n";
