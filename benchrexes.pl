@@ -1,24 +1,485 @@
-#!/usr/bin/perl
-#Some evil things to do
-#	Quantifiers; Always pick the largest given amount (DONE)
-#	Alternations; Always pick the last one (DONE)
-#
-#Make last part not match
-#	Parse "last part"	(DONE)
-#
-#Benchmarking
-#	Time nfagen
-#	Time nfagen_evil
-#	Compare times between the two (larger times are worse, but bigger deltas show more exploitable flexibility)
 use warnings;
 use strict;
-use Getopt::Long;
+#use re::engine::RE2 -max_mem => 8<<29, -strict => 1; # 128MiB;
 use Try::Tiny;
+use IO::CaptureOutput qw(capture qxx qxy);
+use Getopt::Long;
 use Time::HiRes;
 use Time::Out;
 
+my $filename = $ARGV[0];
 my $regex;
-my $string;
+my @rexes;
+open FILE, "$filename" or die "$filename, $!\n";
+while (<FILE>) {
+	my $regex = $_;
+	$regex =~ s/\n$//;
+	@rexes = (@rexes, $regex);
+}
+close FILE;
+
+my $string = 'aaaaaaaaaaaaaaaaaaaaaaax';
+
+my %hashed_rexes;			#Declare hash
+$hashed_rexes{$_} = '' for @rexes;	#Populate hash
+
+my %hashed_rexes2;			#Declare hash
+$hashed_rexes2{$_} = '' for @rexes;	#Populate hash
+
+#This needs to be checked for all 26 memory allocations, below is the
+#long (readable version), the rest are visually compacted but logically
+#equivilant. I would use a loop here, but changing the pragma of the
+#module at runtime was giving me issues; so loop flattening.
+use re::engine::RE2 -max_mem => 8<<26, -strict => 1;
+foreach (@rexes) {
+	$regex = $_;
+	capture{
+	try {
+		if ($string =~ $regex) {}
+		$hashed_rexes{$regex} = 8<<26;
+	} catch {
+		warn "$_";
+	}};
+}
+
+use re::engine::RE2 -max_mem =>8<<25, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<25;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<24, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<24;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<23, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<23;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<22, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<22;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<21, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<21;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<20, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<20;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<19, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<19;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<18, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<18;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<17, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<17;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<16, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<16;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<15, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<15;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<14, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<14;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<13, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<13;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<12, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<12;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<11, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<11;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<10, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<10;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<9, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<9;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<8, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<8;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<7, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<7;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<6, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<6;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<5, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<5;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<4, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<4;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<3, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<3;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<2, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<2;} catch {warn "$_";}};
+}
+
+use re::engine::RE2 -max_mem =>8<<1, -strict => 1;	
+foreach (@rexes) { $regex = $_;
+	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<1;} catch {warn "$_";}};
+}
+
+print "\n";
+
+#Sort our hash descending
+my @sorted_rexes = sort { $hashed_rexes{$b} <=> $hashed_rexes{$a} } keys %hashed_rexes;
+
+print "\n\nMax_Mem Failure Level:\n===============================\nRegex\t\tMemory\n";
+foreach my $memory_req (@sorted_rexes) {	#For all elements in hash
+  	print "$memory_req \t\t $hashed_rexes{$memory_req}\n";
+}
+
+
+my $stdout;
+my $stderr;
+
+use re::engine::RE2 -max_mem =>8<<7, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	capture { if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}}
+}
+
+use re::engine::RE2 -max_mem =>8<<8, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	capture { if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}}
+}
+
+use re::engine::RE2 -max_mem =>8<<9, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	capture { if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}}
+}
+
+use re::engine::RE2 -max_mem =>8<<10, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	capture { if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}}
+}
+
+use re::engine::RE2 -max_mem =>8<<11, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	capture { if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}}
+}
+
+use re::engine::RE2 -max_mem =>8<<12, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<13, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<14, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<15, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<16, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<17, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<18, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<19, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<20, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<21, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<22, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<23, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<24, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<25, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+use re::engine::RE2 -max_mem =>8<<26, -strict => 1;	
+foreach (@rexes) {
+	$regex = $_;
+	capture {
+	try {
+		if ($string =~ $regex) {}
+	} catch {
+		warn "$_";
+	};} \$stdout, \$stderr;
+	if ($stderr =~ /mem\s(.+)/) {
+		$hashed_rexes2{$regex} = $1;
+	}
+}
+
+print "\n";
+
+#Sort our hash descending
+@sorted_rexes = sort { $hashed_rexes2{$b} <=> $hashed_rexes2{$a} } keys %hashed_rexes2;
+
+print "\n\nMemory Requirement for Each Regex:\n===============================\nRegex\t\tMemory\n";
+foreach my $memory_req (@sorted_rexes) {	#For all elements in hash
+  	print "$memory_req \t\t $hashed_rexes2{$memory_req}\n";
+}
+
+
+
+
+
+
+
+
+no re::engine::RE2;
+
 my $debug = 0;
 my $csv = 0;
 my $lexes = 0;
@@ -179,15 +640,14 @@ sub negatelex ($) {
 GetOptions('debug' => \$debug,
 		'csv=s' => \$csv,
 		'lexes' => \$lexes,
-		'timeout=s' => \$timeout_val,
-		'in=s' => \$expressionfile);
+		'timeout=s' => \$timeout_val);
 
-open IN, "$expressionfile" or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
+open IN, "$filename" or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
 my @expressions = <IN>;
 close IN;
 
-print "expression	time	string\n" if $csv;
 open OUT, ">$csv" if $csv;
+print OUT "expression	time	Mem_fail	Mem_use\n" if $csv;
 foreach (@expressions) {
 	chomp($_);									#remove newlines trailing expression
 	my $endanchor = 'no';
@@ -232,7 +692,7 @@ foreach (@expressions) {
 
 
 
-	print OUT "$orig_exp	$end\n" if $csv;
+	print OUT "$orig_exp	$end	$hashed_rexes{$orig_exp}	$hashed_rexes2{$orig_exp}\n" if $csv;
 	#Previous code to make sure matching worked, will not need anymore
 	#if ($csv) {
 	#	try {
