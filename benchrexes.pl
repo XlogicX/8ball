@@ -1,15 +1,45 @@
+#Regular Expression Benchmarker; both NFA (time) and DFA (memory) metrics
 use warnings;
 use strict;
-#use re::engine::RE2 -max_mem => 8<<29, -strict => 1; # 128MiB;
-use Try::Tiny;
-use IO::CaptureOutput qw(capture qxx qxy);
-use Getopt::Long;
-use Time::HiRes;
-use Time::Out;
+use Try::Tiny;								#to capture runwaway garbage
+use IO::CaptureOutput qw(capture qxx qxy);	#to catch error info that I actally use
+use Getopt::Long;							#looooong arguments
+use Time::HiRes;							#used for benchmarking NFA's
+use Time::Out;								#but don't let it get too out of hand
 
-my $filename = $ARGV[0];
-my $regex;
-my @rexes;
+#DFA related vars
+my $filename = $ARGV[0];					#Filename is meant to be the first argument
+my $regex;									#Expressions find themselves here
+my @rexes;									#A big group of them find themselves here
+my $string = 'doesnt_matter';				#used for testing DFA expressions, string/expression pair NA
+my $stdout;									#Used to harvest errors when starving DFA (RE2)...
+my $stderr;									#engine of resources
+#NFA related vars
+my $debug = 0;							#extra debugging info to stdout
+my $csv;								#CSV argument
+my $lexes = 0;							#debug info specific to 'bad' stringification process				
+my $orig_exp;
+my $ll;									#last lexeme
+my $expression;
+my $start;								#For timing
+my $end;								#^^^
+my $timeout_val = 25;					#Defualt timeout value in seconds
+#Some Metacharacter tokens...it's a weird hack, works great, I don't want to talk about it.
+my $openparentoken = 'Ksc8pdCnhh';
+my $closeparentoken = '2KzsuZTSrw';
+my $opensquaretoken = 'pQwCCbYXqB';
+my $closesquaretoken = 'UFa1N8tdjS';
+my $openbracetoken = 'yVvs4ukduq';
+my $closebracetoken = 'PvnD1hEwty';
+my $alternativetoken = 'IAnelK5Zgr';
+
+#Get arguments from user
+GetOptions('debug' => \$debug,
+		'csv=s' => \$csv,
+		'lexes' => \$lexes,
+		'timeout=s' => \$timeout_val);
+
+#Lets get the expression file open and dump them into an array
 open FILE, "$filename" or die "$filename, $!\n";
 while (<FILE>) {
 	my $regex = $_;
@@ -18,8 +48,9 @@ while (<FILE>) {
 }
 close FILE;
 
-my $string = 'aaaaaaaaaaaaaaaaaaaaaaax';
-
+#Now I want two hashes where the expression is the key, and memory use is the value
+#One is Memory level it failed at, and the other is reported memory use. I'm not sure
+#which is better or more accurate, so I grab both.
 my %hashed_rexes;			#Declare hash
 $hashed_rexes{$_} = '' for @rexes;	#Populate hash
 
@@ -167,19 +198,18 @@ foreach (@rexes) { $regex = $_;
 	capture { try { if ($string =~ $regex) {} $hashed_rexes{$regex} = 8<<1;} catch {warn "$_";}};
 }
 
-print "\n";
-
 #Sort our hash descending
 my @sorted_rexes = sort { $hashed_rexes{$b} <=> $hashed_rexes{$a} } keys %hashed_rexes;
 
-print "\n\nMax_Mem Failure Level:\n===============================\nRegex\t\tMemory\n";
-foreach my $memory_req (@sorted_rexes) {	#For all elements in hash
-  	print "$memory_req \t\t $hashed_rexes{$memory_req}\n";
+if (!(defined $csv)) {
+	print "\n\nMax_Mem Failure Level:\n===============================\nRegex\t\tMemory\n";
+	foreach my $memory_req (@sorted_rexes) {	#For all elements in hash
+	  	print "$memory_req \t\t $hashed_rexes{$memory_req}\n";
+	}
 }
 
 
-my $stdout;
-my $stderr;
+
 
 use re::engine::RE2 -max_mem =>8<<7, -strict => 1;	
 foreach (@rexes) {
@@ -461,14 +491,14 @@ foreach (@rexes) {
 	}
 }
 
-print "\n";
-
 #Sort our hash descending
 @sorted_rexes = sort { $hashed_rexes2{$b} <=> $hashed_rexes2{$a} } keys %hashed_rexes2;
 
-print "\n\nMemory Requirement for Each Regex:\n===============================\nRegex\t\tMemory\n";
-foreach my $memory_req (@sorted_rexes) {	#For all elements in hash
-  	print "$memory_req \t\t $hashed_rexes2{$memory_req}\n";
+if (!(defined $csv)) {
+	print "\n\nMemory Requirement for Each Regex:\n===============================\nRegex\t\tMemory\n";
+	foreach my $memory_req (@sorted_rexes) {	#For all elements in hash
+	  	print "$memory_req \t\t $hashed_rexes2{$memory_req}\n";
+	}
 }
 
 
@@ -476,31 +506,7 @@ foreach my $memory_req (@sorted_rexes) {	#For all elements in hash
 
 
 
-
-
-no re::engine::RE2;
-
-my $debug = 0;
-my $csv = 0;
-my $lexes = 0;
-my $expressionfile;
-my $orig_exp;
-#last lexeme sub vars
-my $ll;
-my $expression;
-#Some Metacharacter tokens
-my $openparentoken = 'Ksc8pdCnhh';
-my $closeparentoken = '2KzsuZTSrw';
-my $opensquaretoken = 'pQwCCbYXqB';
-my $closesquaretoken = 'UFa1N8tdjS';
-my $openbracetoken = 'yVvs4ukduq';
-my $closebracetoken = 'PvnD1hEwty';
-my $alternativetoken = 'IAnelK5Zgr';
-
-my $start;
-my $end;
-my $timeout_return;
-my $timeout_val = 25;
+no re::engine::RE2;			#No we go into default perl NFA RE land
 
 sub lastlexeme ($) {
 	$ll = '';
@@ -637,11 +643,6 @@ sub negatelex ($) {
 	};
 }
 
-GetOptions('debug' => \$debug,
-		'csv=s' => \$csv,
-		'lexes' => \$lexes,
-		'timeout=s' => \$timeout_val);
-
 open IN, "$filename" or die "The file has to actually exist, try again $!\n";	#input filehandle is IN
 my @expressions = <IN>;
 close IN;
@@ -655,7 +656,7 @@ foreach (@expressions) {
 		$endanchor = 'yes';						#make note
 	}
 	$orig_exp = $_;
-	print "Original Expression: $_\n"; #if $lexes;
+	print "Original Expression: $_\n" if $lexes;
 	my $last_l = lastlexeme($_);				#get last lexeme
 	print "Last Lexeme: $last_l\n" if $lexes;
 	my $neg_l = negatelex(lastlexeme($_));		#get minimal negation of it
@@ -682,33 +683,20 @@ foreach (@expressions) {
 				#it shouldn't...lulz
 			} else {
 				$end = Time::HiRes::time() - $start;
-				print "failed to match in $end time\n";
+				print "failed to match in $end time\n" if $lexes;
 			}
 		} catch {
-			print "Something went wrong with this pattern\n";
+			print "Something went wrong with this pattern, most likely timed out, which is the best wrong!\n" if $lexes;
 			$end = $timeout_val;
 		};
 	};
 
-
-
 	print OUT "$orig_exp	$end	$hashed_rexes{$orig_exp}	$hashed_rexes2{$orig_exp}\n" if $csv;
-	#Previous code to make sure matching worked, will not need anymore
-	#if ($csv) {
-	#	try {
-	#		if ($regex =~ $string) {
-	#			print "	match";
-	#		} else {
-	#			print "	no match";
-	#	} catch {
-	#		print "	not possible";
-	#	}};
-	#}
-	print "\n-----------------\n";
+	print "\n-----------------\n" if $lexes;
 }
 close OUT if $csv;
 
-sub pcre ($) {
+sub pcre {
 	#Tokenize some metacharacters
 	my $pcre = shift;
 	$pcre =~ s/\\\(/$openparentoken/g; print "\nAfter ( tokenizing:\t\t$pcre\n" if $debug;
