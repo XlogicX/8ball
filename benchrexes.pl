@@ -1,11 +1,11 @@
 #Regular Expression Benchmarker; both NFA (time) and DFA (memory) metrics
 use warnings;
 use strict;
-use Try::Tiny;								#to capture runwaway garbage
-use IO::CaptureOutput qw(capture qxx qxy);	#to catch error info that I actally use
+use Try::Tiny;								#D #to capture runwaway garbage
+use IO::CaptureOutput qw(capture qxx qxy);	#D #to catch error info that I actally use
 use Getopt::Long;							#looooong arguments
 use Time::HiRes;							#used for benchmarking NFA's
-use Time::Out;								#but don't let it get too out of hand
+use Time::Out;								#D #but don't let it get too out of hand
 
 #DFA related vars
 my $filename = $ARGV[0];					#Filename is meant to be the first argument
@@ -17,13 +17,15 @@ my $stderr;									#engine of resources
 #NFA related vars
 my $debug = 0;							#extra debugging info to stdout
 my $csv;								#CSV argument
-my $lexes = 0;							#debug info specific to 'bad' stringification process				
+my $lexes = 0;							#debug info specific to 'bad' stringification process
+my $help;			
 my $orig_exp;
 my $ll;									#last lexeme
 my $expression;
 my $start;								#For timing
 my $end;								#^^^
 my $timeout_val = 25;					#Defualt timeout value in seconds
+my $qlimit = 50;
 #Some Metacharacter tokens...it's a weird hack, works great, I don't want to talk about it.
 my $openparentoken = 'Ksc8pdCnhh';
 my $closeparentoken = '2KzsuZTSrw';
@@ -37,7 +39,13 @@ my $alternativetoken = 'IAnelK5Zgr';
 GetOptions('debug' => \$debug,
 		'csv=s' => \$csv,
 		'lexes' => \$lexes,
-		'timeout=s' => \$timeout_val);
+		'timeout=s' => \$timeout_val,
+		'qlimit=s' => \$qlimit,
+		'help' => \$help);
+
+if ($help) {
+	help();
+}
 
 #Lets get the expression file open and dump them into an array
 open FILE, "$filename" or die "$filename, $!\n";
@@ -61,6 +69,12 @@ $hashed_rexes2{$_} = '' for @rexes;	#Populate hash
 #long (readable version), the rest are visually compacted but logically
 #equivilant. I would use a loop here, but changing the pragma of the
 #module at runtime was giving me issues; so loop flattening.
+
+foreach (@rexes) {
+	$regex = $_;
+	$hashed_rexes{$regex} = 0;		#init all of these to 0
+}
+
 use re::engine::RE2 -max_mem => 8<<26, -strict => 1;
 foreach (@rexes) {
 	$regex = $_;
@@ -209,10 +223,13 @@ if (!(defined $csv)) {
 }
 
 
-
-
-use re::engine::RE2 -max_mem =>8<<7, -strict => 1;	
 foreach (@rexes) {
+	$regex = $_;
+	$hashed_rexes2{$regex} = 0;		#init all of these to 0
+}
+
+use re::engine::RE2 -max_mem =>8<<7, -strict => 1;		#Start with little memory
+foreach (@rexes) {										#try each expression
 	$regex = $_;
 	capture {
 	try {
@@ -221,7 +238,7 @@ foreach (@rexes) {
 		warn "$_";
 	};} \$stdout, \$stderr;
 	capture { if ($stderr =~ /mem\s(.+)/) {
-		$hashed_rexes2{$regex} = $1;
+		$hashed_rexes2{$regex} = $1;					#capture the error if it wasn't enough
 	}}
 }
 
@@ -516,11 +533,12 @@ sub lastlexeme ($) {
 
 	start:
 
+	print "lastlexeme iteration: $expression\n" if $debug;
+
 	if ($expression =~ /[?+*}]\?$/) { 		#If the expression ends in laziness
 		$ll = 'x';							#just fucking give up and set it to 'x'
 		next;
 	}
-
 	if ($expression =~ /(\\?[^}?+*)\]\$])$/){		#is last character an atom
 		$ll = $1;									#if so, this is our last lexeme
 	}
@@ -602,6 +620,9 @@ sub lastlexeme ($) {
 				$expression =~ s/\Q$1\E$//;		
 			}						
 		}
+		if ($expression =~ /(\\\?\*|\\\*\*|\\\$\*|\\\$\*)$/) {		#do we end with a \?*, \** \$?, or \$*
+			$expression =~ s/\Q$1\E$//;					#remove that
+		}
 		goto start;										#OMFG I used a goto
 	}	
 
@@ -649,7 +670,9 @@ close IN;
 
 open OUT, ">$csv" if $csv;
 print OUT "expression	time	Mem_fail	Mem_use\n" if $csv;
+my $line = 0;
 foreach (@expressions) {
+	$line++;
 	chomp($_);									#remove newlines trailing expression
 	my $endanchor = 'no';
 	if ($_ =~ /\$$/) {							#if this is an end anchored expression
@@ -678,6 +701,7 @@ foreach (@expressions) {
 	#Validate timing
 	$start = Time::HiRes::time();
 	Time::Out::timeout $timeout_val => sub {
+	capture {
 		try {
 			if ($regex =~ $orig_exp) {
 				#it shouldn't...lulz
@@ -687,9 +711,11 @@ foreach (@expressions) {
 			}
 		} catch {
 			print "Something went wrong with this pattern, most likely timed out, which is the best wrong!\n" if $lexes;
-			$end = $timeout_val;
-		};
+			$end = Time::HiRes::time() - $start;
+		};} \$stdout, \$stderr;
+		$end = 'Engine Failure' if $stderr;
 	};
+
 
 	print OUT "$orig_exp	$end	$hashed_rexes{$orig_exp}	$hashed_rexes2{$orig_exp}\n" if $csv;
 	print "\n-----------------\n" if $lexes;
@@ -713,6 +739,9 @@ sub pcre {
 	$pcre =~ s/\\x7d/$closebracetoken/gi; print "After } tokenizing:\t\t$pcre\n" if $debug;	
 	$pcre =~ s/\\\|/$alternativetoken/g; print "After | tokenizing:\t\t$pcre\n" if $debug;
 	$pcre =~ s/\\x7c/$alternativetoken/gi; print "After | tokenizing:\t\t$pcre\n" if $debug;	
+
+	#Handle {\d,} situation
+	$pcre =~ s/(\{\d+),(\})/$1,100$2/g;
 
 	#We don't care about non-capturing groups
 	$pcre =~ s/\(\?:/(/g; print "After removing non-capture groups:\t\t$pcre\n" if $debug;
@@ -747,11 +776,11 @@ sub pcre {
 	#Quantifiers (Done)
 	#below is the non-evil version of the + modifier
 	#$pcre =~ s/([^\\])\+/$1/g; print "After +:\t\t$pcre\n" if $debug;		#handle 1 or more (remove the +, thing preceding it stays, wich is equivilant to 1)
-	while ($pcre =~ /([^\\])\+/) {				#Is there still a + quantifier
+	while ($pcre =~ /([^\\+])\+(?<!\+)/) {		#Is there still an unescaped + quantifier with no surrounding +'s
 		$replacement = "$1" x 50;				#If so, take what we are quantifying up to 50
 		$pcre =~ s/([^\\])\+/$replacement/;		#replace that ONE instance with the 50x version (non global; becuase the replacement changes per iteration)
+		print "After +:\t\t$pcre\n" if $debug;
 	}
-	print "After +:\t\t$pcre\n" if $debug;
 	#below is the non-evil version of the * modifier
 	#$pcre =~ s/([^\\])\*/$1/g; print "After *:\t\t$pcre\n" if $debug;		#handle 0, 1, or more (remove the *, thing preceding it stays, wich is equivilant to 1)
 	while ($pcre =~ /([^\\])\*/) {				#Is there still a + quantifier
@@ -815,6 +844,7 @@ sub pcre {
 				$pcre =~ s/\[(.).*?\]/\;/ if ($extra =~ /^\;/); print "After [;:\t\t$pcre\n" if $debug;
 				$pcre =~ s/\[(.).*?\]/\*/ if ($extra =~ /^\*/); print "After [*:\t\t$pcre\n" if $debug;
 				$pcre =~ s/\[(.).*?\]/\\/ if ($extra =~ /^\\/); print "After [\\:\t\t$pcre\n" if $debug;
+				$pcre =~ s/\[(.).*?\]/\\/ if ($extra =~ /^\//); print "After [\\:\t\t$pcre\n" if $debug;				
 				$pcre =~ s/\[(.).*?\]/\\/ if ($extra eq ''); print "After [null:\t\t$pcre\n" if $debug;				
 				$pcre =~ s/\[(.).*?\]/\|/ if ($extra =~ /^\|/); print "After [|:\t\t$pcre\n" if $debug;
 				$pcre =~ s/\[(.).*?\]/\{/ if ($extra =~ /^\{/); print "After [{:\t\t$pcre\n" if $debug;
@@ -823,8 +853,14 @@ sub pcre {
 				$pcre =~ s/\[(.).*?\]/\$/ if ($extra =~ /^\$/); print "After [\$:\t\t$pcre\n" if $debug;
 				$pcre =~ s/\[(.).*?\]/\+/ if ($extra =~ '^\+'); print "After [+:\t\t$pcre\n" if $debug;	
 				$pcre =~ s/\[(.).*?\]/\&/ if ($extra =~ '^\&'); print "After [&:\t\t$pcre\n" if $debug;		
-				$pcre =~ s/\[(.).*?\]/\=/ if ($extra =~ '^\='); print "After [=:\t\t$pcre\n" if $debug;		
-				$pcre =~ s/\[(.).*?\]/\ / if ($extra =~ '^\ '); print "After [sp:\t\t$pcre\n" if $debug;														
+				$pcre =~ s/\[(.).*?\]/\=/ if ($extra =~ '^\='); print "After [=:\t\t$pcre\n" if $debug;	
+				$pcre =~ s/\[(.).*?\]/\!/ if ($extra =~ '^\!'); print "After [!:\t\t$pcre\n" if $debug;
+				$pcre =~ s/\[(.).*?\]/\@/ if ($extra =~ '^\@'); print "After [\@:\t\t$pcre\n" if $debug;
+				$pcre =~ s/\[(.).*?\]/\^/ if ($extra =~ '^^'); print "After [^:\t\t$pcre\n" if $debug;														
+				$pcre =~ s/\[(.).*?\]/\ / if ($extra =~ '^\ '); print "After [sp:\t\t$pcre\n" if $debug;
+				$pcre =~ s/\[(.).*?\]/\t/ if ($extra =~ '^t'); print "After [\\t:\t\t$pcre\n" if $debug;				
+				#gracefully handle unicode, results are a failure, but prevents infinite loop
+				$pcre =~ s/\[(.).*?\]/\u/ if ($extra =~ '^u'); print "After [\\u:\t\t$pcre\n" if $debug;														
 			} else {
 				$pcre =~ s/\[(.).*?\]/$class/; print "After [^:\t\t$pcre\n" if $debug;
 			}
@@ -846,8 +882,8 @@ sub pcre {
 					$digit2 = $3;
 					if ($digit2 =~ /(\d+)/) {
 						$digit2 = $1;
-						if ($digit2 > 49) {
-							$digit2 = 50;
+						if ($digit2 > ($qlimit - 1)) {
+							$digit2 = $qlimit;
 						}
 						$digit2--;						
 						$char = $char x $digit2;
@@ -858,7 +894,11 @@ sub pcre {
 					$char = $char x $digit;
 				}
 			}
-			$pcre =~ s/.\{(\d).*?\}/$char/s; print "After {}'s:\t\t$pcre\n" if $debug;
+			if ($char eq '') {
+				$pcre =~ s/\{(\d).*?\}//s; print "After {}'s:\t\t$pcre\n" if $debug;
+			} else { 
+				$pcre =~ s/.\{(\d).*?\}/$char/s; print "After {}'s:\t\t$pcre\n" if $debug;
+			}
 		} else {
 			if ($pcre =~ /(\(.+?\))\{(\d+)(.*?)\}/s) {
 				$char = $1;
@@ -867,8 +907,8 @@ sub pcre {
 					$digit2 = $3;
 					if ($digit2 =~ /(\d+)/) {
 						$digit2 = $1;
-						if ($digit2 > 49) {
-							$digit2 = 50;
+						if ($digit2 > ($qlimit - 1)) {
+							$digit2 = $qlimit;
 						}
 						$digit2--;
 						$char = $char x $digit2;
@@ -883,12 +923,12 @@ sub pcre {
 		}
 	}
 
-	#handle grouping ()'s, take the first alternation in ()'s
-	while ($pcre =~ /\((.+?)\|.+?\)/){		#while we still have a group
+	#handle grouping ()'s, take the last alternation in ()'s
+	while ($pcre =~ /\(([^)]+?)\|.+?\)/s){		#while we still have a group
 
 		#Do something with it
 		#$pcre =~ s/\((.+?)\|.+?\)/$1/; 		#this replaces with first option
-		$pcre =~ s/\(.+?\|([^|]+?)\)/$1/;			#this replaces with last option
+		$pcre =~ s/\(.+?\|([^|]*?)\)/$1/s;			#this replaces with last option
 
 
 		print "After ()'s:\t\t$pcre\n" if $debug;		#debugging line
@@ -907,4 +947,25 @@ sub pcre {
 	$pcre =~ s/$alternativetoken/|/g; print "\nAfter | add:\t\t$pcre\n" if $debug;	
 
 	return $pcre;					
+}
+
+sub help {
+	print "NAME\n";
+	print "\tBenchRexes - A Regular Expression Benchmarking tool\n\n";
+	print "SYNOPSIS\n";
+	print "\tbenchrexes.pl regex.txt [options]\n\n";
+	print "DESCRIPTION\n";
+	print "\tThis script will analyze a list of regular expressions for performance; metrics are measured on time taken and memory usage\n\n";
+	print "OPTIONS\n";
+	print "\t--help: Prints this dialog\n";
+	print "\t--timeout: How long to try an expression before giving up. Default is 25.\n";
+	print "\t--csv: csv output of results\n";
+	print "\t--qlimit: upper limit cap on regex quantifiers. Default is 50. Larger number == more agressive\n";
+	print "\t--lexes: prints some behind the scenes on NFA RE:DoS expression-to-string creation (to sdtout)\n";
+	print "\t--debug: prints DETAILED debugging info for the string creation engine\n";
+	print "EXAMPLES\n";
+	print "\tbenchrexes.pl emerging_pcres.txt --timeout 4 --csv output.csv\n";
+	print "\tbenchrexes.pl bad_expressions.txt --timeout 50 --csv output.csv\n";
+	print "\tbenchrexes.pl malformed_expressions.txt --lexes --debug\n";
+	exit;
 }
