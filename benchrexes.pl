@@ -538,7 +538,7 @@ sub lastlexeme ($) {
 
 	if ($expression =~ /[?+*}]\?$/) { 		#If the expression ends in laziness
 		$ll = 'x';							#just fucking give up and set it to 'x'
-		next;
+		return;
 	}
 	if ($expression =~ /(\\?[^}?+*)\]\$])$/){		#is last character an atom
 		$ll = $1;									#if so, this is our last lexeme
@@ -680,12 +680,13 @@ foreach (@expressions) {
 		$endanchor = 'yes';						#make note
 	}
 	$orig_exp = $_;
-	print "Original Expression: $_\n" if ($lexes or $strings);
-	my $last_l = lastlexeme($_);				#get last lexeme
+	print "$line\n";
+	print "Original Expression: $orig_exp\n" if ($lexes or $strings);
+	my $last_l = lastlexeme($orig_exp);				#get last lexeme
 	print "Last Lexeme: $last_l\n" if $lexes;
-	my $neg_l = negatelex(lastlexeme($_));		#get minimal negation of it
+	my $neg_l = negatelex(lastlexeme($orig_exp));		#get minimal negation of it
 	print "Negated Last Lexeme: $neg_l\n" if $lexes;	
-	$regex = $string = $_;						#get our expression
+	$regex = $string = $orig_exp;						#get our expression
 
 	if ($endanchor eq 'yes') {
 		my $last_l_norm = pcre($last_l);
@@ -693,7 +694,10 @@ foreach (@expressions) {
 		$neg_l = $last_l_norm . $neg_l;
 	}
 
-	$regex =~ s/\Q$last_l\E.*$/$neg_l/;			#sub last lexeme with literal bad/negation part
+	#sub last lexeme with literal bad/negation part
+	$regex =~ s/\Q$last_l\E\$?$//;
+	$regex .= $neg_l;
+	#$regex =~ s/\Q$last_l\E.*$/$neg_l/;			#sub last lexeme with literal bad/negation part (too greedy to use, even when using lazy)
 	print "Unmatching Bastard Expression: $regex\n" if $lexes;
 
 	$regex = pcre($regex);		#pass through again
@@ -807,9 +811,19 @@ sub pcre {
 	#Quantifiers (Done)
 	#below is the non-evil version of the + modifier
 	#$pcre =~ s/([^\\])\+/$1/g; print "After +:\t\t$pcre\n" if $debug;		#handle 1 or more (remove the +, thing preceding it stays, wich is equivilant to 1)
-	while ($pcre =~ /([^\\+])\+(?<!\+)/) {		#Is there still an unescaped + quantifier with no surrounding +'s
-		$replacement = "$1" x 50;				#If so, take what we are quantifying up to 50
-		$pcre =~ s/([^\\])\+/$replacement/;		#replace that ONE instance with the 50x version (non global; becuase the replacement changes per iteration)
+	while ($pcre =~ /([^\\+])\+(?!\+)/) {		#Is there still an unescaped + quantifier with no surrounding +'s
+		my $classchar = $1;
+		#handle character class (pick the last character)
+		if ($classchar eq ']') {
+			if ($pcre =~ /(.)[^\\+]\+(?!\+)/) {
+				$classchar = $1;
+				$replacement = "$classchar" x 50;
+				$pcre =~ s/\[[^\]]+?\]\+/$replacement/;
+			}
+		} else {
+			$replacement = "$classchar" x 50;				#If so, take what we are quantifying up to 50
+			$pcre =~ s/([^\\])\+/$replacement/;		#replace that ONE instance with the 50x version (non global; becuase the replacement changes per iteration)
+		}
 		print "After +:\t\t$pcre\n" if $debug;
 	}
 	#below is the non-evil version of the * modifier
