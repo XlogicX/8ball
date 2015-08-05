@@ -360,7 +360,9 @@ while ($count < $payloads) {								#while we still have rules
 						my $last_l_norm = pcre_dos($last_l);
 						$neg_l = $last_l_norm . $neg_l;
 					}
-					$regex =~ s/\Q$last_l\E.*$/$neg_l/;			#sub last lexeme with literal bad/negation part
+					#sub last lexeme with literal bad/negation part
+					$regex =~ s/\Q$last_l\E\$?$//;
+					$regex .= $neg_l;
 					$regex = pcre_dos($regex);		#pass through again
 				} catch {
 					$regex = "I'm a stupid payload, becuase 8ball couldn't DoS\n";
@@ -647,9 +649,20 @@ sub pcre_dos {
 	#Quantifiers (Done)
 	#below is the non-evil version of the + modifier
 	#$pcre =~ s/([^\\])\+/$1/g;		#handle 1 or more (remove the +, thing preceding it stays, wich is equivilant to 1)
-	while ($pcre =~ /([^\\+])\+(?<!\+)/) {		#Is there still an unescaped + quantifier with no surrounding +'s
-		$replacement = "$1" x 50;				#If so, take what we are quantifying up to 50
-		$pcre =~ s/([^\\])\+/$replacement/;		#replace that ONE instance with the 50x version (non global; becuase the replacement changes per iteration)
+	while ($pcre =~ /([^\\+])\+(?!\+)/) {		#Is there still an unescaped + quantifier with no surrounding +'s
+		my $classchar = $1;
+		#handle character class (pick the last character)
+		if ($classchar eq ']') {
+			if ($pcre =~ /(.)[^\\+]\+(?!\+)/) {
+				$classchar = $1;
+				$replacement = "$classchar" x 50;
+				$pcre =~ s/\[[^\]]+?\]\+/$replacement/;
+			}
+		} else {
+			$replacement = "$classchar" x 50;				#If so, take what we are quantifying up to 50
+			$pcre =~ s/([^\\])\+/$replacement/;		#replace that ONE instance with the 50x version (non global; becuase the replacement changes per iteration)
+		}
+		print "After +:\t\t$pcre\n" if $debug;
 	}
 	#below is the non-evil version of the * modifier
 	#$pcre =~ s/([^\\])\*/$1/g;		#handle 0, 1, or more (remove the *, thing preceding it stays, wich is equivilant to 1)
