@@ -662,7 +662,7 @@ sub pcre_dos {
 			$replacement = "$classchar" x 50;				#If so, take what we are quantifying up to 50
 			$pcre =~ s/([^\\])\+/$replacement/;		#replace that ONE instance with the 50x version (non global; becuase the replacement changes per iteration)
 		}
-		print "After +:\t\t$pcre\n" if $debug;
+		print "After +:\t\t$pcre\n";
 	}
 	#below is the non-evil version of the * modifier
 	#$pcre =~ s/([^\\])\*/$1/g;		#handle 0, 1, or more (remove the *, thing preceding it stays, wich is equivilant to 1)
